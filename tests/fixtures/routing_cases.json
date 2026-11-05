@@ -1,0 +1,103 @@
+[
+  {
+    "id": "acme-hyphen",
+    "instructions": "Show me the Acme fee-waiver draft we worked on.",
+    "draft_id": "acme-waiver-2027",
+    "worker": "Acme waiver",
+    "context": null,
+    "kind": "retrieve"
+  },
+  {
+    "id": "acme-deadline",
+    "instructions": "Show me the draft asking Acme Support for another week.",
+    "draft_id": "acme-deadline-2027",
+    "worker": "Acme deadline",
+    "context": null,
+    "kind": "retrieve"
+  },
+  {
+    "id": "jai-recipient",
+    "instructions": "Show me the revised proposal draft for Jai.",
+    "draft_id": "jai-proposal",
+    "worker": "Jai proposal",
+    "context": null,
+    "kind": "retrieve"
+  },
+  {
+    "id": "vijay-recipient",
+    "instructions": "Show me the revised proposal draft for Vijay.",
+    "draft_id": "vijay-proposal",
+    "worker": "Vijay proposal",
+    "context": null,
+    "kind": "retrieve"
+  },
+  {
+    "id": "acme-prior-year",
+    "instructions": "Show me the 2026 fee-waiver draft for Acme Billing, not the 2027 one.",
+    "draft_id": "acme-waiver-2026",
+    "worker": "Acme waiver 2026",
+    "context": null,
+    "kind": "retrieve"
+  },
+  {
+    "id": "acme-current-year",
+    "instructions": "Pull up the 2027 Acme Billing fee waiver draft, not the one for 2026.",
+    "draft_id": "acme-waiver-2027",
+    "worker": "Acme waiver",
+    "context": null,
+    "kind": "retrieve"
+  },
+  {
+    "id": "acme-paraphrase",
+    "instructions": "Show me the note asking the vendor to make an exception on this year's charge.",
+    "draft_id": "acme-waiver-2027",
+    "worker": "Acme waiver",
+    "context": "We were working on the 2027 Acme renewal.",
+    "kind": "retrieve"
+  },
+  {
+    "id": "acme-deadline-paraphrase",
+    "instructions": "Can I see the note asking for more time before we decide?",
+    "draft_id": "acme-deadline-2027",
+    "worker": "Acme deadline",
+    "context": "We were working on the 2027 Acme renewal.",
+    "kind": "retrieve"
+  },
+  {
+    "id": "recent-jai",
+    "instructions": "Show me that draft.",
+    "draft_id": "jai-proposal",
+    "worker": "Jai proposal",
+    "context": "[SUCCESS] Jai proposal: Saved the revised proposal draft for Jai.",
+    "kind": "retrieve"
+  },
+  {
+    "id": "recent-vijay",
+    "instructions": "Pull that up so I can review it.",
+    "draft_id": "vijay-proposal",
+    "worker": "Vijay proposal",
+    "context": "[SUCCESS] Vijay proposal: Saved the revised proposal draft for Vijay.",
+    "kind": "retrieve"
+  },
+  {
+    "id": "new-jai-draft",
+    "instructions": "Create a new Gmail draft to jai@example.com with subject \"Renewal call\" and exact body \"Can we discuss the renewal on Tuesday?\"",
+    "draft_id": null,
+    "worker": null,
+    "context": null,
+    "kind": "create",
+    "expected": {
+      "recipient_email": "jai@example.com",
+      "subject": "Renewal call",
+      "body": "Can we discuss the renewal on Tuesday?"
+    }
+  },
+  {
+    "id": "ambiguous-proposal",
+    "instructions": "Show me the revised proposal draft.",
+    "draft_id": null,
+    "worker": null,
+    "context": null,
+    "kind": "clarify"
+  }
+]

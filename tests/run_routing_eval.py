@@ -20,6 +20,7 @@ from fake_gmail import FakeGmail
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("fixtures") / "routing_mailbox.json"
+CASES = FIXTURE.with_name("routing_cases.json")
 DEFAULT_BASELINE = "5b5f635"
 _DRAFT_HEADERS = re.compile(r"^To:[ \t]*(.+)\r?\nSubject:[ \t]*(.+)", re.IGNORECASE | re.MULTILINE)
 
@@ -59,7 +60,7 @@ def read_key():
     return None
 
 
-async def run_case(checkout, version, extra_workers, args):
+async def run_case(checkout, version, extra_workers, args, case_id=None):
     sys.path.insert(0, str(checkout))
 
     from server.agents.execution_agent import runtime as execution
@@ -71,8 +72,11 @@ async def run_case(checkout, version, extra_workers, args):
     from server.services.execution import log_store, roster
 
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    case = fixture["follow_up"]
-    expected = next(draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"])
+    case = (
+        next(item for item in json.loads(CASES.read_text(encoding="utf-8")) if item["id"] == case_id)
+        if case_id else {"id": "acme-hyphen", "kind": "retrieve", **fixture["follow_up"]}
+    )
+    expected = next((draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"]), None)
     mailbox = FakeGmail(fixture["drafts"])
     calls, routing = [], []
     live_completion = interaction.request_chat_completion
@@ -117,6 +121,11 @@ async def run_case(checkout, version, extra_workers, args):
         memory = WorkingMemoryLog(base / "working_memory.log")
         with patch.object(conversation, "_resolve_working_memory_log", return_value=memory):
             chat = conversation.ConversationLog(base / "conversation.log")
+        if context := case.get("context"):
+            if context.startswith("[SUCCESS]"):
+                chat.record_agent_message(context)
+            else:
+                chat.record_user_message(context)
         for worker in fixture["workers"]:
             agents.add_agent(worker["name"])
             if version == "lookup":
@@ -169,16 +178,49 @@ async def run_case(checkout, version, extra_workers, args):
     replies = [payload for tag, _, payload in entries if tag == "poke_reply"]
     writes = [call for call in mailbox.calls if call[0] != "GMAIL_LIST_DRAFTS"]
     interaction_tokens = [call["input_tokens"] for call in calls if call["role"] == "interaction"]
-    returned_body, conflicting_drafts = score_draft_replies(replies, expected)
+    execution_tokens = [call["input_tokens"] for call in calls if call["role"] == "execution"]
+    conflicting_drafts = []
+    unexpected_writes = writes
+    if case["kind"] == "retrieve":
+        returned_body, conflicting_drafts = score_draft_replies(replies, expected)
+        success = returned_body and not conflicting_drafts and not writes
+    elif case["kind"] == "create":
+        success = (
+            len(writes) == 1 and writes[0][0] == "GMAIL_CREATE_EMAIL_DRAFT"
+            and all(writes[0][2].get(key) == value for key, value in case["expected"].items())
+            and len(mailbox.drafts) == len(fixture["drafts"]) + 1
+        )
+        unexpected_writes = [] if success else writes
+    else:
+        # Judge whether the reply requests the missing detail against the fixture.
+        success = False if writes else None
+
+    dispatched = [event["result"] for event in routing
+                  if event["tool"] == "send_message_to_agent" and event["success"]]
+    shortlists = [event["result"]["matches"] for event in routing
+                  if event["tool"] == "search_execution_agents" and event["success"]]
+    target = case["worker"]
     model_failed = any(call.get("failed") for call in calls)
     return {
+        "case": case["id"],
+        "case_kind": case["kind"],
         "version": version,
         "roster_size": len(fixture["workers"]) + extra_workers,
         "prompt": case["instructions"],
         "expected_worker": case["worker"],
-        "expected_draft": expected["id"],
+        "expected_draft": case["draft_id"],
+        "expected_new_draft": case.get("expected"),
+        "expected_worker_reused": (
+            any(job["agent_name"] == target and not job["new_agent_created"] for job in dispatched)
+            if target else None
+        ),
+        "expected_worker_retrieved": (
+            any(match["name"] == target for shortlist in shortlists for match in shortlist)
+            if target and shortlists else None
+        ),
+        "new_workers_created": sum(job["new_agent_created"] for job in dispatched),
         "task_success": (
-            None if model_failed else result.success and returned_body and not conflicting_drafts and not writes
+            None if model_failed else result.success and success
         ),
         "conflicting_drafts": conflicting_drafts,
         "initial_turn_success": result.success,
@@ -187,9 +229,13 @@ async def run_case(checkout, version, extra_workers, args):
         "worker_results": [payload for tag, _, payload in entries if tag == "agent_message"],
         "routing": routing,
         "gmail_calls": mailbox.calls,
-        "unexpected_write_attempts": writes,
+        "unexpected_write_attempts": unexpected_writes,
         "interaction_input_tokens": (
             sum(interaction_tokens) if all(value is not None for value in interaction_tokens) else None
+        ),
+        "initial_interaction_input_tokens": interaction_tokens[0] if interaction_tokens else None,
+        "execution_input_tokens": (
+            sum(execution_tokens) if all(value is not None for value in execution_tokens) else None
         ),
         "model_calls": calls,
         "elapsed_seconds": round(elapsed, 3),
@@ -204,12 +250,14 @@ def main():
     parser.add_argument("--execution-model", default="anthropic/claude-sonnet-4.6")
     parser.add_argument("--timeout", type=float, default=180, help="Per-run timeout in seconds.")
     parser.add_argument("--output", type=Path, help="Write JSON Lines results to this file.")
-    parser.add_argument("--child", nargs=3, metavar=("CHECKOUT", "VERSION", "EXTRA"), help=argparse.SUPPRESS)
+    case_ids = [case["id"] for case in json.loads(CASES.read_text(encoding="utf-8"))]
+    parser.add_argument("--case", choices=case_ids, action="append", help="Run only this case. Repeat to select several.")
+    parser.add_argument("--child", nargs=4, metavar=("CHECKOUT", "VERSION", "EXTRA", "CASE"), help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.child:
-        checkout, version, extra = args.child
-        print(json.dumps(asyncio.run(run_case(Path(checkout), version, int(extra), args))))
+        checkout, version, extra, case_id = args.child
+        print(json.dumps(asyncio.run(run_case(Path(checkout), version, int(extra), args, case_id))))
         return
 
     key = read_key()
@@ -233,24 +281,25 @@ def main():
             ignore=shutil.ignore_patterns("data", "__pycache__"),
         )
 
-        for version, checkout in (("baseline", baseline), ("lookup", lookup)):
-            for extra in (0, args.large_extra_workers):
-                print(f"Running {version} with {extra} extra workers", file=sys.stderr)
-                process = subprocess.run(
-                    [
-                        sys.executable, str(Path(__file__).resolve()),
-                        "--interaction-model", args.interaction_model,
-                        "--execution-model", args.execution_model,
-                        "--timeout", str(args.timeout),
-                        "--child", str(checkout), version, str(extra),
-                    ],
-                    cwd=checkout, env=env, check=True, stdout=subprocess.PIPE, text=True,
-                )
-                record = json.dumps(json.loads(process.stdout))
-                print(record, flush=True)
-                if args.output:
-                    with args.output.open("a", encoding="utf-8") as output:
-                        output.write(record + "\n")
+        for case_id in args.case or case_ids:
+            for version, checkout in (("baseline", baseline), ("lookup", lookup)):
+                for extra in (0, args.large_extra_workers):
+                    print(f"Running {version} case {case_id} with {extra} extra workers", file=sys.stderr)
+                    process = subprocess.run(
+                        [
+                            sys.executable, str(Path(__file__).resolve()),
+                            "--interaction-model", args.interaction_model,
+                            "--execution-model", args.execution_model,
+                            "--timeout", str(args.timeout),
+                            "--child", str(checkout), version, str(extra), case_id,
+                        ],
+                        cwd=checkout, env=env, check=True, stdout=subprocess.PIPE, text=True,
+                    )
+                    record = json.dumps(json.loads(process.stdout))
+                    print(record, flush=True)
+                    if args.output:
+                        with args.output.open("a", encoding="utf-8") as output:
+                            output.write(record + "\n")
 
 
 if __name__ == "__main__":
