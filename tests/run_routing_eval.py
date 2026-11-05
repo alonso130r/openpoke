@@ -20,8 +20,6 @@ from fake_gmail import FakeGmail
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = Path(__file__).with_name("fixtures") / "routing_mailbox.json"
-CASES = FIXTURE.with_name("routing_cases.json")
 DEFAULT_BASELINE = "5b5f635"
 
 
@@ -132,7 +130,7 @@ def read_key():
     return None
 
 
-async def run_case(checkout, version, extra_workers, args, case_id=None, target_position="default"):
+async def run_case(checkout, version, extra_workers, args, case_id, target_position="default"):
     sys.path.insert(0, str(checkout))
 
     from server.agents.execution_agent import runtime as execution
@@ -143,13 +141,12 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
     from server.services.conversation.summarization.working_memory_log import WorkingMemoryLog
     from server.services.execution import log_store, roster
 
-    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    case = (
-        next(item for item in json.loads(getattr(args, "cases_file", CASES).read_text(encoding="utf-8")) if item["id"] == case_id)
-        if case_id else {"id": "acme-hyphen", "kind": "retrieve", **fixture["follow_up"]}
+    case = next(
+        item for item in json.loads(args.cases_file.read_text(encoding="utf-8"))
+        if item["id"] == case_id
     )
-    fixture = case.get("mailbox", fixture)
-    expected = next((draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"]), None)
+    fixture = case["mailbox"]
+    expected = next(draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"])
     mailbox = FakeGmail(fixture["drafts"])
     calls, routing, interaction_tools = [], [], []
     live_completion = interaction.request_chat_completion
@@ -209,10 +206,6 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
             else:
                 chat.record_user_message(context)
         extra_topics = {
-            "stress-acme-week": ("Acme Support renewal two-week extension",),
-            "stress-jai-address": ("Jai Northstar revised proposal",),
-            "stress-acme-year": ("Acme Billing renewal fee waiver approval",),
-            "stress-atlas-revision": ("Vijay Atlas fixed-price proposal with support add-on",),
             "workload-beacon-legal": ("Beacon rollout wording Legal review",),
             "workload-orion-finance": ("Orion renewal Finance exception review",),
             "workload-northstar-security": ("Northstar incident customer update Security review",),
@@ -294,23 +287,9 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
     writes = [call for call in mailbox.calls if call[0] != "GMAIL_LIST_DRAFTS"]
     interaction_tokens = [call["input_tokens"] for call in calls if call["role"] == "interaction"]
     execution_tokens = [call["input_tokens"] for call in calls if call["role"] == "execution"]
-    conflicting_drafts = []
-    correct_draft_shown = None
-    unexpected_writes = writes
-    if case["kind"] == "retrieve":
-        returned_body, conflicting_drafts = score_draft_replies(replies, expected)
-        correct_draft_shown = returned_body and not conflicting_drafts
-        success = returned_body and not conflicting_drafts and not writes
-    elif case["kind"] == "create":
-        success = (
-            len(writes) == 1 and writes[0][0] == "GMAIL_CREATE_EMAIL_DRAFT"
-            and all(writes[0][2].get(key) == value for key, value in case["expected"].items())
-            and len(mailbox.drafts) == len(fixture["drafts"]) + 1
-        )
-        unexpected_writes = [] if success else writes
-    else:
-        # Judge whether the reply requests the missing detail against the fixture.
-        success = False if writes else None
+    returned_body, conflicting_drafts = score_draft_replies(replies, expected)
+    correct_draft_shown = returned_body and not conflicting_drafts
+    success = correct_draft_shown and not writes
 
     dispatched = [event["result"] for event in routing
                   if event["tool"] == "send_message_to_agent" and event["success"]]
@@ -350,7 +329,6 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
         "prompt": case["instructions"],
         "expected_worker": case["worker"],
         "expected_draft": case["draft_id"],
-        "expected_new_draft": case.get("expected"),
         "expected_worker_reused": (
             any(job["agent_name"] == target and not job["new_agent_created"] for job in dispatched)
             if target else None
@@ -380,7 +358,7 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
         "routing": routing,
         "interaction_tools": interaction_tools,
         "gmail_calls": mailbox.calls,
-        "unexpected_write_attempts": unexpected_writes,
+        "unexpected_write_attempts": writes,
         "interaction_input_tokens": (
             sum(interaction_tokens) if all(value is not None for value in interaction_tokens) else None
         ),
@@ -401,12 +379,12 @@ def main():
     parser.add_argument("--execution-model", default="anthropic/claude-sonnet-4.6")
     parser.add_argument("--timeout", type=float, default=180, help="Per-run timeout in seconds.")
     parser.add_argument("--output", type=Path, help="Write JSON Lines results to this file.")
-    parser.add_argument("--cases-file", type=Path, default=CASES,
-                        help="Replay cases from a prepared snapshot instead of the default fixtures.")
+    parser.add_argument("--cases-file", type=Path, required=True,
+                        help="Replay cases from a prepared routing snapshot.")
     parser.add_argument("--case", action="append", help="Run only this case. Repeat to select several.")
     parser.add_argument(
         "--target-position", choices=("early", "middle", "late"),
-        help="Run only stress cases at this position on the large roster.",
+        help="Run cases at this position on the large roster.",
     )
     parser.add_argument("--version", choices=("baseline", "lookup"), help="Run only this version.")
     parser.add_argument("--include-small", action="store_true",
@@ -416,6 +394,8 @@ def main():
 
     args.cases_file = args.cases_file.resolve()
     cases = {case["id"]: case for case in json.loads(args.cases_file.read_text(encoding="utf-8"))}
+    if not cases or any(case.get("kind") != "retrieve" or "mailbox" not in case for case in cases.values()):
+        parser.error("--cases-file must contain prepared draft retrieval cases")
     case_ids = list(cases)
     if args.case and any(case_id not in cases for case_id in args.case):
         parser.error(f"Unknown case. Available cases: {', '.join(case_ids)}")
@@ -428,10 +408,6 @@ def main():
     if args.include_small and not args.target_position:
         parser.error("--include-small requires --target-position")
     selected_cases = args.case or case_ids
-    if args.target_position:
-        if args.case and any("mailbox" not in cases[case_id] for case_id in args.case):
-            parser.error("--target-position requires stress cases")
-        selected_cases = [case_id for case_id in selected_cases if "mailbox" in cases[case_id]]
     key = read_key()
     if not key:
         parser.error("Set OPENROUTER_API_KEY in the environment or the OpenPoke .env file.")
@@ -465,7 +441,7 @@ def main():
                 for extra in roster_sizes:
                     positions = (
                         (args.target_position,) if args.target_position
-                        else ("early", "middle", "late") if extra and "mailbox" in cases[case_id]
+                        else ("early", "middle", "late") if extra
                         else ("default",)
                     )
                     for position in positions:

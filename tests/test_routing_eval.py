@@ -32,28 +32,18 @@ class DraftReplyScoringTests(unittest.TestCase):
 
 
 class ProvenanceFixtureTests(unittest.TestCase):
-    def test_only_the_expected_worker_history_identifies_the_approved_draft(self):
+    def test_workload_fixtures_give_only_one_worker_the_approval(self):
         import json
+        from pathlib import Path
 
-        from run_routing_eval import CASES
-
-        cases = [case for case in json.loads(CASES.read_text()) if case.get("provenance")]
+        fixture = Path(__file__).with_name("fixtures") / "workload_approval_setup.json"
+        cases = json.loads(fixture.read_text(encoding="utf-8"))
         self.assertEqual(len(cases), 3)
         for case in cases:
             with self.subTest(case=case["id"]):
-                drafts = case["mailbox"]["drafts"]
-                expected = next(draft for draft in drafts if draft["id"] == case["draft_id"])
-                alternatives = [
-                    draft for draft in drafts if draft["id"] != expected["id"]
-                    and draft["recipient_email"] == expected["recipient_email"]
-                    and draft["subject"] == expected["subject"]
-                ]
-                self.assertTrue(alternatives)
-                self.assertTrue(all(draft["body"] != expected["body"] for draft in alternatives))
-                self.assertTrue(all("approved" not in draft["body"].lower() for draft in drafts))
-                workers = case["mailbox"]["workers"]
-                self.assertEqual(
-                    [worker["name"] for worker in workers if expected["id"] in worker.get("history", "")],
-                    [case["worker"]],
-                )
-                self.assertFalse(any(expected["id"] in worker["summary"] for worker in workers))
+                workers = case["workers"]
+                self.assertEqual(len(workers), 5)
+                self.assertEqual([worker for worker in workers if worker.get("approver")], [workers[0]])
+                self.assertEqual(len({(worker["recipient_email"], worker["subject"]) for worker in workers}), 1)
+                self.assertEqual(len({worker["body"] for worker in workers}), 5)
+                self.assertTrue(all("approved" not in worker["body"].lower() for worker in workers))

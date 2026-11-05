@@ -12,6 +12,14 @@ OpenPoke is a simplified, open-source take on [Interaction Company’s](https://
 - Node.js 18+
 - npm 9+
 
+## Routing demo
+
+The interaction agent searches worker names and summaries instead of receiving
+the full execution roster on every turn. See [the routing demo](DEMO.md) for
+the benchmark results and instructions to replay the comparison with simulated
+Gmail. The demo only needs the Python backend and an OpenRouter API key. See
+[the routing README](ROUTING.md) for the design, experiments, and next steps.
+
 ## Quickstart
 1. **Clone and enter the repo.**
    ```bash

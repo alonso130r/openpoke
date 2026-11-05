@@ -46,5 +46,5 @@ server/repomix-output.txt
 server/plans/
 
 
-# stuff
-results/
+# Local routing eval snapshots and run traces
+/results/
