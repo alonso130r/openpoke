@@ -1,84 +1,113 @@
-"""Simple agent roster management - just a list of agent names."""
+"""Persist execution agent names and their optional routing summaries."""
 
-import json
 import fcntl
-import time
+import json
+from contextlib import contextmanager
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterator, TypedDict
 
 from ...logging_config import logger
 
 
+class AgentRecord(TypedDict):
+    name: str
+    summary: str | None
+
+
 class AgentRoster:
-    """Simple roster that stores agent names in a JSON file."""
+    """Store agent records while supporting existing name-based callers."""
 
     def __init__(self, roster_path: Path):
         self._roster_path = roster_path
-        self._agents: list[str] = []
+        self._lock_path = roster_path.with_suffix(roster_path.suffix + ".lock")
+        self._agents: dict[str, str | None] = {}
         self.load()
 
+    def _read(self) -> dict[str, str | None]:
+        try:
+            with self._roster_path.open(encoding="utf-8") as file:
+                data = json.load(file)
+        except FileNotFoundError:
+            return {}
+
+        if not isinstance(data, list):
+            raise ValueError("Agent roster must be a list")
+
+        agents: dict[str, str | None] = {}
+        for entry in data:
+            if isinstance(entry, str):
+                agents[entry] = None
+            elif isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                summary = entry.get("summary")
+                agents[entry["name"]] = summary if isinstance(summary, str) else None
+            else:
+                raise ValueError("Invalid agent roster entry")
+        return agents
+
     def load(self) -> None:
-        """Load agent names from roster.json."""
-        if self._roster_path.exists():
-            try:
-                with open(self._roster_path, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        self._agents = [str(name) for name in data]
-            except Exception as exc:
-                logger.warning(f"Failed to load roster.json: {exc}")
-                self._agents = []
-        else:
-            self._agents = []
-            self.save()
+        """Refresh the snapshot from disk."""
+        try:
+            self._agents = self._read()
+        except (OSError, ValueError) as exc:
+            logger.warning("Failed to load agent roster: %s", exc)
+            self._agents = {}
 
-    def save(self) -> None:
-        """Save agent names to roster.json with file locking."""
-        max_retries = 5
-        retry_delay = 0.1
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self._roster_path.parent.mkdir(parents=True, exist_ok=True)
+        # Lock a separate file so the lock survives replacement of the roster.
+        with self._lock_path.open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            yield
 
-        for attempt in range(max_retries):
-            try:
-                self._roster_path.parent.mkdir(parents=True, exist_ok=True)
-
-                # Open file and acquire exclusive lock
-                with open(self._roster_path, 'w') as f:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    try:
-                        json.dump(self._agents, f, indent=2)
-                        return
-                    finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-            except BlockingIOError:
-                # Lock is held by another process
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    logger.warning("Failed to acquire lock on roster.json after retries")
-            except Exception as exc:
-                logger.warning(f"Failed to save roster.json: {exc}")
-                break
+    def _write(self, agents: dict[str, str | None]) -> None:
+        records = [{"name": name, "summary": summary} for name, summary in agents.items()]
+        file = NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=self._roster_path.parent, delete=False
+        )
+        temp_path = Path(file.name)
+        try:
+            with file:
+                json.dump(records, file, indent=2)
+            temp_path.replace(self._roster_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def add_agent(self, agent_name: str) -> None:
-        """Add an agent to the roster if not already present."""
-        if agent_name not in self._agents:
-            self._agents.append(agent_name)
-            self.save()
+        """Register a name without replacing any existing summary."""
+        with self._locked():
+            agents = self._read()
+            if agent_name not in agents:
+                agents[agent_name] = None
+                self._write(agents)
+            self._agents = agents
+
+    def update_summary(self, agent_name: str, summary: str) -> bool:
+        """Update a registered agent and return whether it exists."""
+        with self._locked():
+            agents = self._read()
+            if agent_name not in agents:
+                self._agents = agents
+                return False
+            agents[agent_name] = summary
+            self._write(agents)
+            self._agents = agents
+            return True
 
     def get_agents(self) -> list[str]:
-        """Get list of all agent names."""
+        """Return the names in the current snapshot."""
         return list(self._agents)
 
+    def get_records(self) -> list[AgentRecord]:
+        """Return a copy of the current roster records."""
+        return [{"name": name, "summary": summary} for name, summary in self._agents.items()]
+
     def clear(self) -> None:
-        """Clear the agent roster."""
-        self._agents = []
-        try:
-            if self._roster_path.exists():
-                self._roster_path.unlink()
-            logger.info("Cleared agent roster")
-        except Exception as exc:
-            logger.warning(f"Failed to clear roster.json: {exc}")
+        """Remove all registered agents and their summaries."""
+        with self._locked():
+            self._roster_path.unlink(missing_ok=True)
+            self._agents = {}
 
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
