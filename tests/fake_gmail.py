@@ -25,6 +25,8 @@ class FakeGmail:
             if end < len(drafts):
                 data["nextPageToken"] = str(end)
         elif action == "GMAIL_CREATE_EMAIL_DRAFT":
+            while f"simulated-draft-{self._next_id}" in self.drafts:
+                self._next_id += 1
             draft_id = f"simulated-draft-{self._next_id}"
             self._next_id += 1
             draft = {**deepcopy(arguments), "id": draft_id}

@@ -1,6 +1,7 @@
 """Rank execution agents by whole-term overlap with their routing summaries."""
 
 import re
+from collections import Counter
 from typing import TypedDict
 
 from .roster import AgentRecord
@@ -14,6 +15,9 @@ _FILLER = frozenset(
 
 class SearchMatch(AgentRecord):
     matched_terms: list[str]
+
+
+_COMMON_TO_DISTINCTIVE_RATIO = 5
 
 
 def _terms(text: str) -> set[str]:
@@ -41,6 +45,16 @@ def search_agents(query: str, records: list[AgentRecord]) -> list[SearchMatch]:
                 "summary": record["summary"],
                 "matched_terms": matched_terms,
             })
+
+    frequencies = Counter(term for match in matches for term in match["matched_terms"])
+    if frequencies:
+        broadest = max(frequencies.values())
+        distinctive = {
+            term for term, count in frequencies.items()
+            if count * _COMMON_TO_DISTINCTIVE_RATIO <= broadest
+        }
+        if distinctive:
+            matches = [match for match in matches if distinctive.intersection(match["matched_terms"])]
 
     matches.sort(key=lambda match: (-len(match["matched_terms"]), match["name"]))
     if len(matches) <= 3:

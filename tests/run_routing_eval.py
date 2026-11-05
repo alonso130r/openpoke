@@ -142,7 +142,7 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
 
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     case = (
-        next(item for item in json.loads(CASES.read_text(encoding="utf-8")) if item["id"] == case_id)
+        next(item for item in json.loads(getattr(args, "cases_file", CASES).read_text(encoding="utf-8")) if item["id"] == case_id)
         if case_id else {"id": "acme-hyphen", "kind": "retrieve", **fixture["follow_up"]}
     )
     fixture = case.get("mailbox", fixture)
@@ -227,7 +227,10 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
                 f'Saved draft ID {worker["draft_id"]}.'
                 if "draft_id" in worker else worker["summary"]
             )
-            logs.record_agent_response(worker["name"], worker.get("history", history))
+            if "execution_log" in worker:
+                logs._log_path(worker["name"]).write_text(worker["execution_log"], encoding="utf-8")
+            else:
+                logs.record_agent_response(worker["name"], worker.get("history", history))
 
         with (
             patch.object(roster, "_agent_roster", agents),
@@ -375,15 +378,21 @@ def main():
     parser.add_argument("--execution-model", default="anthropic/claude-sonnet-4.6")
     parser.add_argument("--timeout", type=float, default=180, help="Per-run timeout in seconds.")
     parser.add_argument("--output", type=Path, help="Write JSON Lines results to this file.")
-    cases = {case["id"]: case for case in json.loads(CASES.read_text(encoding="utf-8"))}
-    case_ids = list(cases)
-    parser.add_argument("--case", choices=case_ids, action="append", help="Run only this case. Repeat to select several.")
+    parser.add_argument("--cases-file", type=Path, default=CASES,
+                        help="Replay cases from a prepared snapshot instead of the default fixtures.")
+    parser.add_argument("--case", action="append", help="Run only this case. Repeat to select several.")
     parser.add_argument(
         "--target-position", choices=("early", "middle", "late"),
         help="Run only stress cases at this position on the large roster.",
     )
     parser.add_argument("--child", nargs=5, metavar=("CHECKOUT", "VERSION", "EXTRA", "CASE", "POSITION"), help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    args.cases_file = args.cases_file.resolve()
+    cases = {case["id"]: case for case in json.loads(args.cases_file.read_text(encoding="utf-8"))}
+    case_ids = list(cases)
+    if args.case and any(case_id not in cases for case_id in args.case):
+        parser.error(f"Unknown case. Available cases: {', '.join(case_ids)}")
 
     if args.child:
         checkout, version, extra, case_id, position = args.child
@@ -434,6 +443,7 @@ def main():
                                 "--interaction-model", args.interaction_model,
                                 "--execution-model", args.execution_model,
                                 "--timeout", str(args.timeout),
+                                "--cases-file", str(args.cases_file),
                                 "--child", str(checkout), version, str(extra), case_id, position,
                             ],
                             cwd=checkout, env=env, check=True, stdout=subprocess.PIPE, text=True,

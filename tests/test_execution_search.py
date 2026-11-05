@@ -44,3 +44,16 @@ class ExecutionSearchTests(unittest.TestCase):
         match = search_agents("Acme fee-waiver draft", records)[0]
         self.assertEqual(match["name"], "Acme waiver")
         self.assertEqual(match["matched_terms"], ["acme", "fee", "waiver"])
+
+    def test_distinctive_terms_filter_generic_matches_before_expanding_ties(self):
+        records = [
+            {"name": f"Archive {index}", "summary": "Reviewed an Acme renewal."}
+            for index in range(20)
+        ]
+        records.extend(
+            {"name": f"Orion {index}", "summary": "Drafted an Orion renewal exception."}
+            for index in range(4)
+        )
+        matches = search_agents("Orion renewal exception", records)
+        self.assertEqual([match["name"] for match in matches], [f"Orion {index}" for index in range(4)])
+        self.assertEqual(len(search_agents("renewal", records)), 24)

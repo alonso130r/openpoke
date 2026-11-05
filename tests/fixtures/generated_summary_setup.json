@@ -1,0 +1,28 @@
+[
+  {
+    "id": "generated-recent",
+    "follow_up": "Can you show me that draft again?",
+    "recent": true,
+    "workers": [
+      {"name": "Mina delivery schedule draft", "recipient_email": "mina@example.com", "subject": "Delivery schedule", "body": "Mina, can we move delivery to Thursday?"},
+      {"name": "Mina invoice schedule draft", "recipient_email": "mina@example.com", "subject": "Invoice schedule", "body": "Mina, can we send the invoice on Friday?"}
+    ]
+  },
+  {
+    "id": "generated-approval",
+    "follow_up": "Show me the Orion renewal exception Finance signed off on.",
+    "provenance": true,
+    "workers": [
+      {"name": "Orion renewal Finance approval", "recipient_email": "billing@orion.example", "subject": "Orion renewal", "body": "Could you waive the renewal fee as a one-time exception?", "decision": "Finance approved this exact wording as the final version."},
+      {"name": "Orion renewal wording review", "recipient_email": "billing@orion.example", "subject": "Orion renewal", "body": "Could you reduce the renewal fee by half?", "decision": "This is alternative wording for review and has no final approval."}
+    ]
+  },
+  {
+    "id": "generated-recipients",
+    "follow_up": "Show me Noor's revised Beacon proposal draft.",
+    "workers": [
+      {"name": "Noor Beacon revised proposal", "recipient_email": "noor@example.com", "subject": "Revised Beacon proposal", "body": "Noor, here is the Beacon proposal with the revised rollout dates."},
+      {"name": "Nora Beacon revised proposal", "recipient_email": "nora@example.com", "subject": "Revised Beacon proposal", "body": "Nora, here is the Beacon proposal with the revised budget."}
+    ]
+  }
+]

@@ -80,7 +80,7 @@ class SimulatedMailboxTests(unittest.IsolatedAsyncioTestCase):
                     lookup = tools.handle_tool_call("search_execution_agents", {"query": case["query"]})
                     matches = lookup.payload["matches"]
                     self.assertEqual(matches[0]["name"], case["worker"])
-                    self.assertEqual(len(matches), 3 + extra_workers // 2)
+                    self.assertEqual(len(matches), 2 if extra_workers else 3)
                     dispatch = tools.handle_tool_call("send_message_to_agent", {
                         "mode": "reuse",
                         "agent_name": matches[0]["name"],
