@@ -163,10 +163,13 @@ class InteractionAgentRuntime:
             if not parsed_tool_calls:
                 break
 
+            wait_requested = False
             for tool_call in parsed_tool_calls:
                 summary.tool_names.append(tool_call.name)
 
                 result = self._execute_tool(tool_call)
+                if result.success and tool_call.name == "wait":
+                    wait_requested = True
 
                 if result.success and tool_call.name == "send_message_to_agent":
                     agent_name = tool_call.arguments.get("agent_name")
@@ -182,6 +185,9 @@ class InteractionAgentRuntime:
                     "content": self._format_tool_result(tool_call, result),
                 }
                 messages.append(tool_message)
+            if wait_requested:
+                summary.last_assistant_text = ""
+                break
         else:
             raise RuntimeError("Reached tool iteration limit without final response")
 

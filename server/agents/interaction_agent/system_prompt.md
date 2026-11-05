@@ -32,7 +32,7 @@ Send Draft Tool Usage
 Wait Tool Usage
 
 - `wait(reason)` should be used when you detect that a message or response is already present in the conversation history and you want to avoid duplicating it.
-- This adds a silent log entry (`<wait>reason</wait>`) that prevents redundant messages to the user.
+- This adds a silent log entry (`<wait>reason</wait>`) and ends the current turn after the tool calls in the same response. Execution results arrive in a separate turn.
 - Use this when you see that the same draft, confirmation, or response has already been sent.
 - Always provide a clear reason explaining what you're avoiding duplicating. 
 

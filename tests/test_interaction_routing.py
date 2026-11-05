@@ -135,3 +135,32 @@ class InteractionRoutingTests(unittest.IsolatedAsyncioTestCase):
             get_roster.assert_called_once_with()
             no_match = agent.prepare_message_with_history("Hello.", "")
             self.assertNotIn("<candidate_agents>", no_match[0]["content"])
+
+    async def test_wait_ends_turn_after_other_calls_in_same_response(self):
+        settings = SimpleNamespace(
+            openrouter_api_key="test", interaction_agent_model="test", summarization_enabled=False
+        )
+        log = Mock()
+        log.load_transcript.return_value = ""
+        model = AsyncMock(return_value={"choices": [{"message": {
+            "content": "This should not be sent as a fallback.",
+            "tool_calls": [
+                {"id": "wait", "function": {"name": "wait", "arguments": {"reason": "Pending."}}},
+                {"id": "draft", "function": {"name": "send_draft", "arguments": {
+                    "to": "jai@example.com", "subject": "Draft", "body": "Hello.",
+                }}},
+            ],
+        }}]})
+        with (
+            patch.object(runtime, "get_settings", return_value=settings),
+            patch.object(runtime, "get_conversation_log", return_value=log),
+            patch.object(tools, "get_conversation_log", return_value=log),
+            patch.object(runtime.InteractionAgentRuntime, "_make_llm_call", model),
+        ):
+            result = await runtime.InteractionAgentRuntime().handle_agent_message("Draft ready.")
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.response, "")
+        model.assert_awaited_once()
+        log.record_wait.assert_called_once_with("Pending.")
+        log.record_reply.assert_called_once_with("To: jai@example.com\nSubject: Draft\n\nHello.")
