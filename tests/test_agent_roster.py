@@ -42,3 +42,16 @@ class AgentRosterTests(unittest.TestCase):
         first.clear()
         self.assertFalse(second.update_summary("Vijay", "Finished late."))
         self.assertEqual(AgentRoster(self.path).get_agents(), [])
+
+    def test_creation_rejects_names_that_share_an_execution_log(self):
+        roster = AgentRoster(self.path)
+        self.assertTrue(roster.add_agent("Jai Renewal"))
+        self.assertFalse(roster.add_agent("Jai Renewal"))
+        self.assertFalse(roster.add_agent("jai-renewal"))
+        self.assertEqual(AgentRoster(self.path).get_agents(), ["Jai Renewal"])
+
+    def test_creation_rejects_an_existing_log_without_a_roster_entry(self):
+        (self.path.parent / "jai-renewal.log").write_text("Prior work.", encoding="utf-8")
+        roster = AgentRoster(self.path)
+        self.assertFalse(roster.add_agent("Jai Renewal"))
+        self.assertEqual(roster.get_agents(), [])

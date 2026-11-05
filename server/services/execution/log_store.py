@@ -16,7 +16,7 @@ _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _EXECUTION_LOG_DIR = _DATA_DIR / "execution_agents"
 
 
-def _slugify(name: str) -> str:
+def agent_log_slug(name: str) -> str:
     """Convert agent name to filesystem-safe slug."""
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in name.strip()).strip("-")
     while "--" in slug:
@@ -56,7 +56,7 @@ class ExecutionAgentLogStore:
 
     def _lock_for(self, agent_name: str) -> threading.Lock:
         """Get or create a lock for an agent."""
-        slug = _slugify(agent_name)
+        slug = agent_log_slug(agent_name)
         with self._global_lock:
             if slug not in self._locks:
                 self._locks[slug] = threading.Lock()
@@ -64,7 +64,7 @@ class ExecutionAgentLogStore:
 
     def _log_path(self, agent_name: str) -> Path:
         """Get log file path for an agent."""
-        return self._base_dir / f"{_slugify(agent_name)}.log"
+        return self._base_dir / f"{agent_log_slug(agent_name)}.log"
 
     def _append(self, agent_name: str, tag: str, payload: str) -> None:
         """Append an entry with the given tag."""

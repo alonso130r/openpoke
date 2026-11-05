@@ -8,6 +8,7 @@ from tempfile import NamedTemporaryFile
 from typing import Iterator, TypedDict
 
 from ...logging_config import logger
+from .log_store import agent_log_slug
 
 
 class AgentRecord(TypedDict):
@@ -75,10 +76,12 @@ class AgentRoster:
             temp_path.unlink(missing_ok=True)
 
     def add_agent(self, agent_name: str) -> bool:
-        """Claim a new name and return whether it was inserted."""
+        """Claim an identity with an unused execution log path."""
         with self._locked():
             agents = self._read()
-            if agent_name in agents:
+            slug = agent_log_slug(agent_name)
+            log_path = self._roster_path.parent / f"{slug}.log"
+            if any(agent_log_slug(name) == slug for name in agents) or log_path.exists():
                 self._agents = agents
                 return False
             agents[agent_name] = None

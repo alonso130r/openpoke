@@ -41,6 +41,8 @@ class ExecutionSummaryTests(unittest.IsolatedAsyncioTestCase):
         return result, model.call_args.args[0]
 
     async def test_summary_persists_without_entering_log_or_callback(self):
+        self.logs.record_agent_response("Jai", "Saved renewal draft draft-123.")
+        self.logs.record_agent_response("Other worker", "Saved unrelated draft draft-456.")
         summary = "Drafted Jai's renewal waiver and checked its status."
         result, prompt = await self.execute(
             f"The draft is still pending.\n<routing_summary>{summary}</routing_summary>"
@@ -48,6 +50,8 @@ class ExecutionSummaryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.success)
         self.assertIn("Drafted Jai's renewal waiver.", prompt)
+        self.assertIn("Saved renewal draft draft-123.", prompt)
+        self.assertNotIn("draft-456", prompt)
         self.assertEqual(self.roster.get_records()[0]["summary"], summary)
         self.assertEqual(result.response, "The draft is still pending.")
         self.assertNotIn(summary, self.logs.load_transcript("Jai"))

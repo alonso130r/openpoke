@@ -152,7 +152,7 @@ def send_message_to_agent(agent_name: str, instructions: str, mode: str) -> Tool
     is_new = mode == "create"
     if is_new:
         if not roster.add_agent(agent_name):
-            return ToolResult(success=False, payload={"error": "Agent name already exists"})
+            return ToolResult(success=False, payload={"error": "Agent name is already in use or shares an existing execution log"})
     else:
         roster.load()
         if agent_name not in roster.get_agents():
