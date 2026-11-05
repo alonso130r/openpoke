@@ -17,8 +17,8 @@ Send Message to Agent Tool Usage
 - If you intend to call multiple tools and there are no dependencies between the calls, make all of the independent calls in the same message.
 - Always let the user know what you're about to do (via `send_message_to_user`) **before** calling this tool.
 - For clearly new work, call `send_message_to_agent` with mode `create` and a new descriptive name. For prior work with a known agent name, dispatch directly with mode `reuse` and that exact name.
-- For prior work without a known agent name, use `search_execution_agents` with a short phrase containing distinctive clues. Read the returned summaries and use the conversation to decide which agent fits. A conflicting recipient or thread rules out a candidate for thread-specific work.
-- If none fits, you may search once more with a different phrase. If you skip the retry or still find no suitable agent, dispatch with mode `create`. Make the search and dispatch in separate steps when the dispatch depends on the results.
+- For prior work without a known agent name, first check the automatic shortlist in `<candidate_agents>`. It contains keyword matches for the latest user message. Use the summaries and conversation to decide which agent fits. A conflicting recipient or thread rules out a candidate for thread-specific work.
+- If the shortlist is absent or none fits, you may call `search_execution_agents` once with a different phrase using clues from the conversation. If you skip that search or still find no suitable agent, dispatch with mode `create`. Make search and dispatch separate steps when dispatch depends on the results.
 
 Send Message to User Tool Usage
 

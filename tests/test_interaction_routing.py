@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from server.agents.execution_agent.batch_manager import ExecutionBatchManager
 from server.agents.execution_agent.runtime import ExecutionResult
-from server.agents.interaction_agent import runtime, tools
+from server.agents.interaction_agent import agent, runtime, tools
 from server.services.execution.roster import AgentRoster
 
 
@@ -62,6 +63,7 @@ class InteractionRoutingTests(unittest.IsolatedAsyncioTestCase):
             manager = ExecutionBatchManager()
             with (
                 patch.object(tools, "get_agent_roster", return_value=roster),
+                patch.object(agent, "get_agent_roster", return_value=roster),
                 patch.object(tools, "get_execution_agent_logs", return_value=log),
                 patch.object(tools, "_EXECUTION_BATCH_MANAGER", manager),
                 patch.object(runtime, "get_settings", return_value=settings),
@@ -110,3 +112,26 @@ class InteractionRoutingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(roster.get_agents(), ["Jai"])
             log.record_request.assert_called_once_with("Jai", "Check.")
             manager.execute_agent.assert_awaited_once_with("Jai", "Check.")
+
+    def test_user_prompt_includes_only_top_matches_and_callbacks_skip_lookup(self):
+        roster = Mock()
+        roster.get_records.return_value = [
+            {"name": name, "summary": summary}
+            for name, summary in [
+                ("Archive B", "Reviewed an Acme renewal."),
+                ("Archive A", "Reviewed an Acme renewal."),
+                ("Archive C", "Reviewed an Acme renewal."),
+                ("Waiver", "Drafted an Acme fee waiver."),
+                ("Other", "Prepared a proposal."),
+            ]
+        ]
+        with patch.object(agent, "get_agent_roster", return_value=roster) as get_roster:
+            prompt = agent.prepare_message_with_history("Show the Acme fee-waiver draft.", "")[0]["content"]
+            candidates = json.loads(prompt.split("<candidate_agents>\n")[1].split("\n</candidate_agents>")[0])
+            self.assertEqual([match["name"] for match in candidates], ["Waiver", "Archive A", "Archive B"])
+            self.assertNotIn("<active_agents>", prompt)
+            callback = agent.prepare_message_with_history("Acme fee waiver result.", "", "agent")
+            self.assertNotIn("<candidate_agents>", callback[0]["content"])
+            get_roster.assert_called_once_with()
+            no_match = agent.prepare_message_with_history("Hello.", "")
+            self.assertNotIn("<candidate_agents>", no_match[0]["content"])

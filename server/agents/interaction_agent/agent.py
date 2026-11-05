@@ -1,7 +1,11 @@
 """Interaction agent helpers for prompt construction."""
 
+import json
 from pathlib import Path
 from typing import Dict, List
+
+from ...services.execution import get_agent_roster
+from ...services.execution.search import search_agents
 
 _prompt_path = Path(__file__).parent / "system_prompt.md"
 SYSTEM_PROMPT = _prompt_path.read_text(encoding="utf-8").strip()
@@ -23,6 +27,13 @@ def prepare_message_with_history(
     sections: List[str] = []
 
     sections.append(_render_conversation_history(transcript))
+    if message_type == "user":
+        roster = get_agent_roster()
+        roster.load()
+        candidates = search_agents(latest_text, roster.get_records())
+        if candidates:
+            rendered = json.dumps(candidates, ensure_ascii=False).replace("<", r"\u003c")
+            sections.append(f"<candidate_agents>\n{rendered}\n</candidate_agents>")
     sections.append(_render_current_turn(latest_text, message_type))
 
     content = "\n\n".join(sections)
