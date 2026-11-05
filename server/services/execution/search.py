@@ -1,4 +1,4 @@
-"""Rank execution agents by whole-term overlap with their routing summaries."""
+"""Rank execution agents by whole-term overlap with their names and summaries."""
 
 import re
 from collections import Counter
@@ -38,7 +38,8 @@ def search_agents(query: str, records: list[AgentRecord]) -> list[SearchMatch]:
 
     matches: list[SearchMatch] = []
     for record in records:
-        matched_terms = sorted(query_terms & _terms(record["summary"] or record["name"]))
+        worker_terms = _terms(record["name"]) | _terms(record["summary"] or "")
+        matched_terms = sorted(query_terms & worker_terms)
         if matched_terms:
             matches.append({
                 "name": record["name"],
@@ -54,7 +55,12 @@ def search_agents(query: str, records: list[AgentRecord]) -> list[SearchMatch]:
             if count * _COMMON_TO_DISTINCTIVE_RATIO <= broadest
         }
         if distinctive:
-            matches = [match for match in matches if distinctive.intersection(match["matched_terms"])]
+            strongest = max(len(match["matched_terms"]) for match in matches)
+            matches = [
+                match for match in matches
+                if len(match["matched_terms"]) == strongest
+                or distinctive.intersection(match["matched_terms"])
+            ]
 
     matches.sort(key=lambda match: (-len(match["matched_terms"]), match["name"]))
     if len(matches) <= 3:

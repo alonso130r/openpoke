@@ -91,8 +91,11 @@ def score_draft_replies(replies, expected):
     def normalize(text):
         return " ".join(text.casefold().split())
 
+    def unquote(text):
+        return re.sub(r"^[ \t]*>[ \t]?", "", text, flags=re.MULTILINE)
+
     def draft_body_matches(body):
-        paragraphs = re.split(r"\n[ \t]*\n", body.strip())
+        paragraphs = re.split(r"\n[ \t]*\n", unquote(body).strip())
         return any(
             normalize("\n\n".join(paragraphs[:end]).strip().strip('"“”'))
             == expected_body
@@ -100,7 +103,7 @@ def score_draft_replies(replies, expected):
         )
 
     expected_body = normalize(expected["body"])
-    returned_body = any(expected_body in normalize(reply) for reply in replies)
+    returned_body = any(expected_body in normalize(unquote(reply)) for reply in replies)
     conflicts = []
     for index, reply in enumerate(replies):
         headers = list(_DRAFT_HEADERS.finditer(reply))
@@ -210,6 +213,9 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
             "stress-jai-address": ("Jai Northstar revised proposal",),
             "stress-acme-year": ("Acme Billing renewal fee waiver approval",),
             "stress-atlas-revision": ("Vijay Atlas fixed-price proposal with support add-on",),
+            "workload-beacon-legal": ("Beacon rollout wording Legal review",),
+            "workload-orion-finance": ("Orion renewal Finance exception review",),
+            "workload-northstar-security": ("Northstar incident customer update Security review",),
         }.get(case["id"], ())
         workers = [*fixture["workers"], *roster_distractors(extra_workers, extra_topics)]
         if extra_workers:
@@ -232,7 +238,15 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
             else:
                 logs.record_agent_response(worker["name"], worker.get("history", history))
 
+        reply_times = []
+        record_reply = chat.record_reply
+
+        def timed_reply(message):
+            record_reply(message)
+            reply_times.append({"seconds": round(time.monotonic() - started, 3), "text": message})
+
         with (
+            patch.object(chat, "record_reply", side_effect=timed_reply),
             patch.object(roster, "_agent_roster", agents),
             patch.object(log_store, "_execution_agent_logs", logs),
             patch.object(interaction, "get_conversation_log", return_value=chat),
@@ -270,6 +284,13 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
         entries = list(chat.iter_entries())
 
     replies = [payload for tag, _, payload in entries if tag == "poke_reply"]
+    first_correct_reply_seconds = None
+    if expected:
+        for reply in reply_times:
+            shown, conflicts = score_draft_replies([reply["text"]], expected)
+            if shown and not conflicts:
+                first_correct_reply_seconds = reply["seconds"]
+                break
     writes = [call for call in mailbox.calls if call[0] != "GMAIL_LIST_DRAFTS"]
     interaction_tokens = [call["input_tokens"] for call in calls if call["role"] == "interaction"]
     execution_tokens = [call["input_tokens"] for call in calls if call["role"] == "execution"]
@@ -353,6 +374,8 @@ async def run_case(checkout, version, extra_workers, args, case_id=None, target_
         "initial_turn_success": result.success,
         "initial_turn_error": redact_error(result.error),
         "replies": replies,
+        "reply_times": reply_times,
+        "first_correct_reply_seconds": first_correct_reply_seconds,
         "worker_results": [payload for tag, _, payload in entries if tag == "agent_message"],
         "routing": routing,
         "interaction_tools": interaction_tools,
@@ -385,6 +408,9 @@ def main():
         "--target-position", choices=("early", "middle", "late"),
         help="Run only stress cases at this position on the large roster.",
     )
+    parser.add_argument("--version", choices=("baseline", "lookup"), help="Run only this version.")
+    parser.add_argument("--include-small", action="store_true",
+                        help="Include the small roster at the selected target position.")
     parser.add_argument("--child", nargs=5, metavar=("CHECKOUT", "VERSION", "EXTRA", "CASE", "POSITION"), help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -399,6 +425,8 @@ def main():
         print(json.dumps(asyncio.run(run_case(Path(checkout), version, int(extra), args, case_id, position))))
         return
 
+    if args.include_small and not args.target_position:
+        parser.error("--include-small requires --target-position")
     selected_cases = args.case or case_ids
     if args.target_position:
         if args.case and any("mailbox" not in cases[case_id] for case_id in args.case):
@@ -428,7 +456,12 @@ def main():
 
         for case_id in selected_cases:
             for version, checkout in (("baseline", baseline), ("lookup", lookup)):
-                roster_sizes = (args.large_extra_workers,) if args.target_position else (0, args.large_extra_workers)
+                if args.version and version != args.version:
+                    continue
+                roster_sizes = (
+                    (args.large_extra_workers,) if args.target_position and not args.include_small
+                    else (0, args.large_extra_workers)
+                )
                 for extra in roster_sizes:
                     positions = (
                         (args.target_position,) if args.target_position

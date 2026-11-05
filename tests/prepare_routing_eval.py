@@ -60,9 +60,13 @@ async def prepare_case(case, model):
                     or matching[0]["id"] not in result.response
                 ):
                     raise ValueError(f"{case['id']} / {name}: setup did not save and report the expected draft")
-                if setup.get("decision") and "finance approved" in setup["decision"].lower():
-                    if "approv" not in result.response.casefold() or "finance" not in result.response.casefold():
-                        raise ValueError(f"{case['id']} / {name}: setup result omitted the Finance approval")
+                approver = setup.get("approver")
+                if not approver and "finance approved" in setup.get("decision", "").casefold():
+                    approver = "Finance"
+                if approver:
+                    response = result.response.casefold()
+                    if "approv" not in response or approver.casefold() not in response:
+                        raise ValueError(f"{case['id']} / {name}: setup result omitted {approver} approval")
                 summary = next(record["summary"] for record in agents.get_records() if record["name"] == name)
                 workers.append({
                     "name": name,
@@ -88,14 +92,15 @@ async def prepare_case(case, model):
     }
 
 
-async def prepare(model):
-    cases = json.loads(SETUP.read_text(encoding="utf-8"))
+async def prepare(model, setup_file=SETUP):
+    cases = json.loads(setup_file.read_text(encoding="utf-8"))
     return [await prepare_case(case, model) for case in cases]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="openai/gpt-6-luna")
+    parser.add_argument("--setup-file", type=Path, default=SETUP)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
@@ -105,7 +110,7 @@ def main():
         parser.error("Set OPENROUTER_API_KEY in the environment or the OpenPoke .env file.")
     os.environ["OPENROUTER_API_KEY"] = key
     sys.path.insert(0, str(ROOT))
-    snapshot = asyncio.run(prepare(args.model))
+    snapshot = asyncio.run(prepare(args.model, args.setup_file))
     with args.output.open("x", encoding="utf-8") as output:
         json.dump(snapshot, output, indent=2)
         output.write("\n")

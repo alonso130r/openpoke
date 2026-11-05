@@ -1,0 +1,131 @@
+[
+  {
+    "id": "workload-beacon-legal",
+    "follow_up": "Show me the Beacon wording Legal cleared after we moved the rollout.",
+    "provenance": true,
+    "workers": [
+      {
+        "name": "Beacon rollout wording Legal review",
+        "recipient_email": "noor@example.com",
+        "subject": "Beacon rollout update",
+        "body": "The rollout moves to June 12. Please use the escalation contact if this affects your team.",
+        "approver": "Legal",
+        "decision": "Legal approved this exact wording as the final version. The earlier wording was rejected or left unapproved."
+      },
+      {
+        "name": "Beacon rollout wording commercial review",
+        "recipient_email": "noor@example.com",
+        "subject": "Beacon rollout update",
+        "body": "The rollout moves to June 12. We can offer a service credit if this affects your team.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Beacon rollout scheduling review",
+        "recipient_email": "noor@example.com",
+        "subject": "Beacon rollout update",
+        "body": "The rollout moves to June 12. We will share the implementation schedule shortly.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Beacon rollout customer wording review",
+        "recipient_email": "noor@example.com",
+        "subject": "Beacon rollout update",
+        "body": "The rollout moves to June 12. Please reply if you need to reschedule training.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Beacon rollout account review",
+        "recipient_email": "noor@example.com",
+        "subject": "Beacon rollout update",
+        "body": "The rollout moves to June 12. Your account team will follow up on next steps.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      }
+    ]
+  },
+  {
+    "id": "workload-orion-finance",
+    "follow_up": "Pull up the Orion renewal exception Finance signed off on after rejecting the first version.",
+    "provenance": true,
+    "workers": [
+      {
+        "name": "Orion renewal Finance exception decision",
+        "recipient_email": "billing@orion.example",
+        "subject": "Orion renewal exception",
+        "body": "Could you waive the renewal fee as a one-time exception?",
+        "approver": "Finance",
+        "decision": "Finance approved this exact wording as the final version. The earlier wording was rejected or left unapproved."
+      },
+      {
+        "name": "Orion renewal conditional waiver review",
+        "recipient_email": "billing@orion.example",
+        "subject": "Orion renewal exception",
+        "body": "Could you waive the renewal fee if we renew this month?",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Orion renewal commercial exception review",
+        "recipient_email": "billing@orion.example",
+        "subject": "Orion renewal exception",
+        "body": "Could you waive half the renewal fee as an exception?",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Orion renewal fee review",
+        "recipient_email": "billing@orion.example",
+        "subject": "Orion renewal exception",
+        "body": "Could you credit the renewal fee against next year's invoice?",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Orion renewal account exception review",
+        "recipient_email": "billing@orion.example",
+        "subject": "Orion renewal exception",
+        "body": "Could you defer the renewal fee until the next billing cycle?",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      }
+    ]
+  },
+  {
+    "id": "workload-northstar-security",
+    "follow_up": "Show me the incident update Security cleared for Northstar after the customer call.",
+    "provenance": true,
+    "workers": [
+      {
+        "name": "Northstar incident customer update Security review",
+        "recipient_email": "support@northstar.example",
+        "subject": "Northstar incident update",
+        "body": "The investigation is ongoing. We will share confirmed findings at the next update.",
+        "approver": "Security",
+        "decision": "Security approved this exact wording as the final version. The earlier wording was rejected or left unapproved."
+      },
+      {
+        "name": "Northstar incident root cause wording review",
+        "recipient_email": "support@northstar.example",
+        "subject": "Northstar incident update",
+        "body": "Our working theory is that a stale deployment credential caused the incident.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Northstar incident timeline review",
+        "recipient_email": "support@northstar.example",
+        "subject": "Northstar incident update",
+        "body": "We are reviewing the incident timeline and will follow up with a chronology.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Northstar incident customer call recap",
+        "recipient_email": "support@northstar.example",
+        "subject": "Northstar incident update",
+        "body": "Thanks for joining the call. We will share the next update tomorrow.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      },
+      {
+        "name": "Northstar incident support update review",
+        "recipient_email": "support@northstar.example",
+        "subject": "Northstar incident update",
+        "body": "Support is monitoring the affected service and will share changes as they are confirmed.",
+        "decision": "This is a competing draft for review. No final approval was recorded for this version."
+      }
+    ]
+  }
+]

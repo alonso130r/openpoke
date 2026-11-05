@@ -57,3 +57,20 @@ class ExecutionSearchTests(unittest.TestCase):
         matches = search_agents("Orion renewal exception", records)
         self.assertEqual([match["name"] for match in matches], [f"Orion {index}" for index in range(4)])
         self.assertEqual(len(search_agents("renewal", records)), 24)
+
+    def test_name_and_summary_supply_distinct_terms_without_double_counting(self):
+        record = {
+            "name": "Northstar incident customer update Security review",
+            "summary": "Recorded Security approval for the Northstar incident update.",
+        }
+        match = search_agents("Northstar customer update Security approval", [record])[0]
+        self.assertEqual(match["matched_terms"], ["approval", "customer", "northstar", "security", "update"])
+
+    def test_rare_term_does_not_exclude_equally_strong_matches(self):
+        records = [
+            {"name": f"Northstar customer update Security {index}", "summary": None}
+            for index in range(6)
+        ]
+        records.append({"name": "Northstar customer call update", "summary": None})
+        matches = search_agents("Northstar customer update Security call", records)
+        self.assertEqual(len(matches), 7)

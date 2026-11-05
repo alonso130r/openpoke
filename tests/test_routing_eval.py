@@ -11,7 +11,7 @@ class DraftReplyScoringTests(unittest.TestCase):
             "body": "Could you waive the renewal fee as an exception?",
         }
         correct = f'To: {expected["recipient_email"]}\nSubject: {expected["subject"]}\n\n{expected["body"]}'
-        fabricated = "To: sarah.lin@acmecorp.com\nSubject: Request for Fee Waiver\n\nPlease waive the $1,200 fee."
+        fabricated = "To: sarah.lin@acmecorp.com\nSubject: Request for Fee Waiver\n\n> Please waive the $1,200 fee."
         self.assertEqual(score_draft_replies([correct, "Here is the draft."], expected), (True, []))
         returned_body, conflicts = score_draft_replies([correct, fabricated], expected)
         self.assertTrue(returned_body)
@@ -25,7 +25,7 @@ class DraftReplyScoringTests(unittest.TestCase):
             "subject": "Renewal",
             "body": "Could you waive the fee?",
         }
-        for body in ("“Could you waive the fee?”", "Could you waive the fee?\n\nIt hasn't been sent."):
+        for body in ("> Could you waive the fee?", "“Could you waive the fee?”", "Could you waive the fee?\n\nIt hasn't been sent."):
             with self.subTest(body=body):
                 reply = f"To: billing@acme.example\nSubject: Renewal\n\n{body}"
                 self.assertEqual(score_draft_replies([reply], expected), (True, []))
