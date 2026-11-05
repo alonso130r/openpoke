@@ -22,6 +22,43 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("fixtures") / "routing_mailbox.json"
 CASES = FIXTURE.with_name("routing_cases.json")
 DEFAULT_BASELINE = "5b5f635"
+
+
+def align_baseline_wait(checkout):
+    """Apply the current wait contract to the archived baseline only."""
+    directory = checkout / "server/agents/interaction_agent"
+    runtime_path = directory / "runtime.py"
+    source = runtime_path.read_text(encoding="utf-8")
+    if "            if wait_requested:\n" not in source:
+        edits = (
+            ("            for tool_call in parsed_tool_calls:",
+             "            wait_requested = False\n            for tool_call in parsed_tool_calls:"),
+            ("                result = self._execute_tool(tool_call)\n",
+             "                result = self._execute_tool(tool_call)\n"
+             '                if result.success and tool_call.name == "wait":\n'
+             "                    wait_requested = True\n"),
+            ("                messages.append(tool_message)\n        else:",
+             "                messages.append(tool_message)\n"
+             '            if wait_requested:\n                summary.last_assistant_text = ""\n'
+             "                break\n        else:"),
+        )
+        for old, new in edits:
+            if source.count(old) != 1:
+                raise ValueError("Cannot align wait behavior for this baseline runtime")
+            source = source.replace(old, new, 1)
+        runtime_path.write_text(source, encoding="utf-8")
+
+    prompt_path = directory / "system_prompt.md"
+    prompt = prompt_path.read_text(encoding="utf-8")
+    old = "and ends the current turn after the tool calls in the same response."
+    if old not in prompt:
+        prompt_path.write_text(prompt.replace(
+            "that prevents redundant messages to the user.",
+            old + " Execution results arrive in a separate turn.",
+            1,
+        ), encoding="utf-8")
+
+
 _DRAFT_HEADERS = re.compile(r"^To:[ \t]*(.+)\r?\nSubject:[ \t]*(.+)", re.IGNORECASE | re.MULTILINE)
 
 
@@ -290,6 +327,7 @@ def main():
         )
         with zipfile.ZipFile(io.BytesIO(archive)) as source:
             source.extractall(baseline)
+        align_baseline_wait(baseline)
         shutil.copytree(
             ROOT / "server", lookup / "server",
             ignore=shutil.ignore_patterns("data", "__pycache__"),
