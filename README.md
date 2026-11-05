@@ -1,5 +1,18 @@
 # OpenPoke 🌴
 
+## Routing challenge
+
+This project is my solution to a challenge about agent overload in OpenPoke.
+As the roster grows, the interaction agent sees more execution workers on
+every turn. The challenge was to give it less context while preserving its
+ability to find the right worker for a follow-up. My approach searches
+worker names and summaries and shows a shortlist instead of the full roster.
+
+- [Routing design](ROUTING.md) covers the assumptions, what I tried, and what I'd test next.
+- [Demo and benchmark results](DEMO.md) shows how to replay the comparison with simulated Gmail.
+
+## About OpenPoke
+
 OpenPoke is a simplified, open-source take on [Interaction Company’s](https://interaction.co/about) [Poke](https://poke.com/) assistant—built to show how a multi-agent orchestration stack can feel genuinely useful. It keeps the handful of things Poke is great at (email triage, reminders, and persistent agents) while staying easy to spin up locally.
 
 - Multi-agent FastAPI backend that mirrors Poke's interaction/execution split, powered by [OpenRouter](https://openrouter.ai/).
@@ -11,14 +24,6 @@ OpenPoke is a simplified, open-source take on [Interaction Company’s](https://
 - Python 3.10+
 - Node.js 18+
 - npm 9+
-
-## Routing demo
-
-The interaction agent searches worker names and summaries instead of receiving
-the full execution roster on every turn. See [the routing demo](DEMO.md) for
-the benchmark results and instructions to replay the comparison with simulated
-Gmail. The demo only needs the Python backend and an OpenRouter API key. See
-[the routing README](ROUTING.md) for the design, experiments, and next steps.
 
 ## Quickstart
 1. **Clone and enter the repo.**
