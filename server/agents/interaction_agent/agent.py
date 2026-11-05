@@ -1,6 +1,8 @@
 """Interaction agent helpers for prompt construction."""
 
 import json
+import re
+from html import unescape
 from pathlib import Path
 from typing import Dict, List
 
@@ -9,6 +11,8 @@ from ...services.execution.search import search_agents
 
 _prompt_path = Path(__file__).parent / "system_prompt.md"
 SYSTEM_PROMPT = _prompt_path.read_text(encoding="utf-8").strip()
+_AGENT_MESSAGE = re.compile(r"<agent_message(?: [^>]*)?>(.*?)</agent_message>", re.DOTALL)
+_RESULT_HEADER = re.compile(r"^\[(SUCCESS|FAILED)\] (.+?):", re.MULTILINE)
 
 
 # Load and return the pre-defined system prompt from markdown file
@@ -30,6 +34,10 @@ def prepare_message_with_history(
     if message_type == "user":
         roster = get_agent_roster()
         roster.load()
+        recent_worker = _recent_worker(transcript, roster.get_agents())
+        if recent_worker:
+            rendered = json.dumps(recent_worker, ensure_ascii=False).replace("<", r"\u003c")
+            sections.append(f"<recent_worker>{rendered}</recent_worker>")
         candidates = search_agents(latest_text, roster.get_records())
         if candidates:
             rendered = json.dumps(candidates, ensure_ascii=False).replace("<", r"\u003c")
@@ -38,6 +46,17 @@ def prepare_message_with_history(
 
     content = "\n\n".join(sections)
     return [{"role": "user", "content": content}]
+
+
+def _recent_worker(transcript: str, names: list[str]) -> str | None:
+    """Identify a single registered worker from the latest result batch."""
+    batches = _AGENT_MESSAGE.findall(transcript)
+    if not batches:
+        return None
+    headers = _RESULT_HEADER.findall(unescape(batches[-1]))
+    if len(headers) == 1 and headers[0][0] == "SUCCESS" and headers[0][1] in names:
+        return headers[0][1]
+    return None
 
 
 # Format conversation transcript into XML tags for LLM context

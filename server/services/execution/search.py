@@ -27,7 +27,7 @@ def _terms(text: str) -> set[str]:
 
 
 def search_agents(query: str, records: list[AgentRecord]) -> list[SearchMatch]:
-    """Return up to three positive matches, with name as the stable tie-breaker."""
+    """Return the top three positive matches and all ties at the cutoff."""
     query_terms = _terms(query)
     if not query_terms:
         return []
@@ -43,4 +43,7 @@ def search_agents(query: str, records: list[AgentRecord]) -> list[SearchMatch]:
             })
 
     matches.sort(key=lambda match: (-len(match["matched_terms"]), match["name"]))
-    return matches[:3]
+    if len(matches) <= 3:
+        return matches
+    cutoff = len(matches[2]["matched_terms"])
+    return [match for match in matches if len(match["matched_terms"]) >= cutoff]

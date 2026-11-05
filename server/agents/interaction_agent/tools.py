@@ -47,7 +47,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_execution_agents",
-            "description": "Find up to three existing execution agents by keyword overlap with their routing summaries.",
+            "description": "Find the top three execution agents by keyword overlap with their routing summaries, including all ties at the cutoff.",
             "parameters": {
                 "type": "object",
                 "properties": {

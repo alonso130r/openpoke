@@ -22,7 +22,7 @@ class ExecutionSearchTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(search_agents(query, records), [])
 
-    def test_ranks_by_hit_count_then_name_and_caps_results(self):
+    def test_ranks_by_hit_count_and_includes_all_ties_at_cutoff(self):
         records = [
             {"name": name, "summary": summary}
             for name, summary in [
@@ -33,7 +33,7 @@ class ExecutionSearchTests(unittest.TestCase):
             ]
         ]
         matches = search_agents("renewal waiver renewal", records)
-        self.assertEqual([match["name"] for match in matches], ["Zulu", "Alpha", "Charlie"])
+        self.assertEqual([match["name"] for match in matches], ["Zulu", "Alpha", "Charlie", "Delta"])
 
     def test_hyphenated_query_keeps_the_waiver_in_a_crowded_shortlist(self):
         records = [

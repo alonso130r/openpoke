@@ -128,7 +128,7 @@ class InteractionRoutingTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(agent, "get_agent_roster", return_value=roster) as get_roster:
             prompt = agent.prepare_message_with_history("Show the Acme fee-waiver draft.", "")[0]["content"]
             candidates = json.loads(prompt.split("<candidate_agents>\n")[1].split("\n</candidate_agents>")[0])
-            self.assertEqual([match["name"] for match in candidates], ["Waiver", "Archive A", "Archive B"])
+            self.assertEqual([match["name"] for match in candidates], ["Waiver", "Archive A", "Archive B", "Archive C"])
             self.assertNotIn("<active_agents>", prompt)
             callback = agent.prepare_message_with_history("Acme fee waiver result.", "", "agent")
             self.assertNotIn("<candidate_agents>", callback[0]["content"])
@@ -164,3 +164,20 @@ class InteractionRoutingTests(unittest.IsolatedAsyncioTestCase):
         model.assert_awaited_once()
         log.record_wait.assert_called_once_with("Pending.")
         log.record_reply.assert_called_once_with("To: jai@example.com\nSubject: Draft\n\nHello.")
+
+    def test_recent_worker_hint_uses_only_unambiguous_registered_results(self):
+        roster = Mock()
+        roster.get_agents.return_value = ["Jai proposal", "Vijay proposal"]
+        roster.get_records.return_value = []
+        prior = '<agent_message timestamp="now">[SUCCESS] Jai proposal: Draft saved.</agent_message>'
+        with patch.object(agent, "get_agent_roster", return_value=roster):
+            prompt = agent.prepare_message_with_history("Show me that draft.", prior)[0]["content"]
+            self.assertIn('<recent_worker>"Jai proposal"</recent_worker>', prompt)
+            for latest in (
+                "[SUCCESS] Missing: Draft saved.",
+                "[FAILED] Jai proposal: Could not save draft.",
+                "[SUCCESS] Jai proposal: Saved.\n[SUCCESS] Vijay proposal: Saved.",
+            ):
+                transcript = prior + f"<agent_message>{latest}</agent_message>"
+                prompt = agent.prepare_message_with_history("Show me that draft.", transcript)[0]["content"]
+                self.assertNotIn("<recent_worker>", prompt)

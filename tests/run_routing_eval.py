@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -22,6 +23,28 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("fixtures") / "routing_mailbox.json"
 CASES = FIXTURE.with_name("routing_cases.json")
 DEFAULT_BASELINE = "5b5f635"
+
+
+def roster_distractors(count):
+    """Create plausible prior work without changing the mailbox fixture."""
+    topics = (
+        "Acme Billing renewal fee waiver",
+        "Acme Support renewal deadline extension",
+        "Acme Billing renewal charge dispute",
+        "Jai revised proposal",
+        "Vijay revised proposal",
+    )
+    scopes = ("pilot", "enterprise", "regional", "partner", "trial")
+    for index in range(count):
+        topic = topics[index % len(topics)]
+        variant = index // len(topics)
+        scope = scopes[variant % len(scopes)]
+        year = 2022 + (variant // len(scopes)) % 6
+        reference = f"archive-{index + 1}"
+        yield {
+            "name": f"{topic} {year} {scope} {reference}",
+            "summary": f"Reviewed the {year} {scope} {topic} for {reference}.",
+        }
 
 
 def align_baseline_wait(checkout):
@@ -135,9 +158,16 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
         key = settings.openrouter_api_key
         return message.replace(key, "[redacted]") if message and key else message
 
+    automatic_shortlist = []
+
     def track_model(role):
         async def complete(**kwargs):
             call = {"role": role, "model": kwargs["model"], "input_tokens": None}
+            if role == "interaction" and not calls:
+                prompt = kwargs["messages"][0]["content"]
+                match = re.search(r"^<candidate_agents>\n(.*?)\n</candidate_agents>$", prompt, re.MULTILINE | re.DOTALL)
+                if match:
+                    automatic_shortlist.extend(json.loads(match[1]))
             calls.append(call)
             try:
                 result = await live_completion(**kwargs)
@@ -173,17 +203,18 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
                 chat.record_agent_message(context)
             else:
                 chat.record_user_message(context)
-        for worker in fixture["workers"]:
+        workers = [*fixture["workers"], *roster_distractors(extra_workers)]
+        if extra_workers:
+            random.Random(case["id"]).shuffle(workers)
+        for worker in workers:
             agents.add_agent(worker["name"])
             if version == "lookup":
                 agents.update_summary(worker["name"], worker["summary"])
-            logs.record_agent_response(worker["name"], f'Saved draft ID {worker["draft_id"]}.')
-        for index in range(extra_workers):
-            topic = "Acme renewal" if index % 2 else "Vendor proposal"
-            name = f"{topic} archive {index}"
-            agents.add_agent(name)
-            if version == "lookup":
-                agents.update_summary(name, f"Reviewed an older {topic}.")
+            history = (
+                f'Saved draft ID {worker["draft_id"]}.'
+                if "draft_id" in worker else worker["summary"]
+            )
+            logs.record_agent_response(worker["name"], history)
 
         with (
             patch.object(roster, "_agent_roster", agents),
@@ -262,6 +293,12 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
         "expected_worker_reused": (
             any(job["agent_name"] == target and not job["new_agent_created"] for job in dispatched)
             if target else None
+        ),
+        "automatic_shortlist_size": len(automatic_shortlist) if version == "lookup" else None,
+        "manual_shortlist_sizes": [len(shortlist) for shortlist in shortlists],
+        "expected_worker_in_automatic_shortlist": (
+            any(match["name"] == target for match in automatic_shortlist)
+            if target and version == "lookup" else None
         ),
         "expected_worker_retrieved": (
             any(match["name"] == target for shortlist in shortlists for match in shortlist)

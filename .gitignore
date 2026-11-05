@@ -44,3 +44,7 @@ server/venv/
 # Generated documentation / analysis artifacts
 server/repomix-output.txt
 server/plans/
+
+
+# stuff
+routing-eval-luna-250-wait-aligned-all.jsonl

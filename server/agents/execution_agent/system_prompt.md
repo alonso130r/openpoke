@@ -56,6 +56,9 @@ After completing the task, write the normal result. On a separate final line,
 append one sentence inside `<routing_summary>...</routing_summary>` with a
 maximum of 320 characters. This sentence helps the interaction agent find
 your work later. Preserve the original purpose and useful identifying details,
-such as the recipient, topic, or thread ID. If a previous routing summary is
+such as the recipient, topic, or thread ID. Preserve distinctive wording from
+the user's request and name the concrete action when the wording is vague.
+For example, "Drafted a request for more time on the 2027 Acme renewal deadline."
+If a previous routing summary is
 provided, update it with relevant new details while keeping the original context.
 Only include a routing summary in the final response after tool calls are done.
