@@ -10,6 +10,26 @@ from .tools import get_tool_schemas, get_tool_registry
 from ...config import get_settings
 from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
+from ...services.execution import get_agent_roster
+
+
+def _split_routing_summary(response: str) -> Tuple[str, Optional[str]]:
+    """Separate optional routing metadata from the task result."""
+    body, marker, block = ("\n" + response).partition("\n<routing_summary>")
+    if not marker:
+        return response, None
+
+    summary, closing_tag, trailing = block.partition("</routing_summary>")
+    summary = summary.strip()
+    if (
+        not closing_tag
+        or trailing.strip()
+        or not 0 < len(summary) <= 320
+        or len(summary.splitlines()) != 1
+        or "<" in summary
+    ):
+        summary = None
+    return body.strip() or "No action required.", summary
 
 
 @dataclass
@@ -126,7 +146,13 @@ class ExecutionAgentRuntime:
             if final_response is None:
                 raise RuntimeError("LLM did not return a final response")
 
+            final_response, routing_summary = _split_routing_summary(final_response)
             self.agent.record_response(final_response)
+            if routing_summary:
+                try:
+                    get_agent_roster().update_summary(self.agent.name, routing_summary)
+                except (OSError, ValueError) as exc:
+                    logger.warning("[%s] Failed to save routing summary: %s", self.agent.name, exc)
 
             return ExecutionResult(
                 agent_name=self.agent.name,

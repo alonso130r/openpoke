@@ -1,9 +1,10 @@
 """Execution Agent implementation."""
 
+from html import escape
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from ...services.execution import get_execution_agent_logs
+from ...services.execution import get_agent_roster, get_execution_agent_logs
 from ...logging_config import logger
 
 
@@ -68,6 +69,14 @@ class ExecutionAgent:
             System prompt with embedded history transcript
         """
         base_prompt = self.build_system_prompt()
+        roster = get_agent_roster()
+        roster.load()
+        summary = next(
+            (record["summary"] for record in roster.get_records() if record["name"] == self.name),
+            None,
+        )
+        if summary:
+            base_prompt += f"\n\n<previous_routing_summary>{escape(summary, quote=False)}</previous_routing_summary>"
 
         # Load history transcript
         transcript = self._log_store.load_transcript(self.name)
