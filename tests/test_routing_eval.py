@@ -18,3 +18,14 @@ class DraftReplyScoringTests(unittest.TestCase):
         self.assertEqual(conflicts, [{
             "reply_index": 1, "recipient": "sarah.lin@acmecorp.com", "subject": "Request for Fee Waiver",
         }])
+
+    def test_quotes_and_separate_commentary_are_not_draft_conflicts(self):
+        expected = {
+            "recipient_email": "billing@acme.example",
+            "subject": "Renewal",
+            "body": "Could you waive the fee?",
+        }
+        for body in ("“Could you waive the fee?”", "Could you waive the fee?\n\nIt hasn't been sent."):
+            with self.subTest(body=body):
+                reply = f"To: billing@acme.example\nSubject: Renewal\n\n{body}"
+                self.assertEqual(score_draft_replies([reply], expected), (True, []))

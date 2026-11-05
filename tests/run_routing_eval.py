@@ -30,6 +30,14 @@ def score_draft_replies(replies, expected):
     def normalize(text):
         return " ".join(text.casefold().split())
 
+    def draft_body_matches(body):
+        paragraphs = re.split(r"\n[ \t]*\n", body.strip())
+        return any(
+            normalize("\n\n".join(paragraphs[:end]).strip().strip('"“”'))
+            == expected_body
+            for end in range(1, len(paragraphs) + 1)
+        )
+
     expected_body = normalize(expected["body"])
     returned_body = any(expected_body in normalize(reply) for reply in replies)
     conflicts = []
@@ -42,7 +50,7 @@ def score_draft_replies(replies, expected):
             if (
                 normalize(recipient) != normalize(expected["recipient_email"])
                 or normalize(subject) != normalize(expected["subject"])
-                or normalize(body) != expected_body
+                or not draft_body_matches(body)
             ):
                 conflicts.append({"reply_index": index, "recipient": recipient, "subject": subject})
     return returned_body, conflicts
@@ -78,7 +86,7 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
     )
     expected = next((draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"]), None)
     mailbox = FakeGmail(fixture["drafts"])
-    calls, routing = [], []
+    calls, routing, interaction_tools = [], [], []
     live_completion = interaction.request_chat_completion
     handle_tool = interaction.handle_tool_call
     settings = get_settings()
@@ -107,11 +115,13 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
 
     def track_tool(name, arguments):
         result = handle_tool(name, arguments)
+        event = {
+            "tool": name, "arguments": arguments,
+            "success": result.success, "result": result.payload,
+        }
+        interaction_tools.append(event)
         if name in ("search_execution_agents", "send_message_to_agent"):
-            routing.append({
-                "tool": name, "arguments": arguments,
-                "success": result.success, "result": result.payload,
-            })
+            routing.append(event)
         return result
 
     with tempfile.TemporaryDirectory() as directory:
@@ -180,9 +190,11 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
     interaction_tokens = [call["input_tokens"] for call in calls if call["role"] == "interaction"]
     execution_tokens = [call["input_tokens"] for call in calls if call["role"] == "execution"]
     conflicting_drafts = []
+    correct_draft_shown = None
     unexpected_writes = writes
     if case["kind"] == "retrieve":
         returned_body, conflicting_drafts = score_draft_replies(replies, expected)
+        correct_draft_shown = returned_body and not conflicting_drafts
         success = returned_body and not conflicting_drafts and not writes
     elif case["kind"] == "create":
         success = (
@@ -223,11 +235,13 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
             None if model_failed else result.success and success
         ),
         "conflicting_drafts": conflicting_drafts,
+        "correct_draft_shown": correct_draft_shown,
         "initial_turn_success": result.success,
         "initial_turn_error": redact_error(result.error),
         "replies": replies,
         "worker_results": [payload for tag, _, payload in entries if tag == "agent_message"],
         "routing": routing,
+        "interaction_tools": interaction_tools,
         "gmail_calls": mailbox.calls,
         "unexpected_write_attempts": unexpected_writes,
         "interaction_input_tokens": (
