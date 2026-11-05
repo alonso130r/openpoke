@@ -1,0 +1,230 @@
+"""Compare OpenPoke routing with live models and a local, simulated Gmail inbox."""
+
+import argparse
+import asyncio
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import zipfile
+from pathlib import Path
+from unittest.mock import patch
+
+from fake_gmail import FakeGmail
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = Path(__file__).with_name("fixtures") / "routing_mailbox.json"
+DEFAULT_BASELINE = "5b5f635"
+
+
+def read_key():
+    if key := os.environ.get("OPENROUTER_API_KEY"):
+        return key
+    env_file = ROOT / ".env"
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            name, _, value = line.partition("=")
+            if name.strip() == "OPENROUTER_API_KEY":
+                return value.strip().strip("'\"")
+    return None
+
+
+async def run_case(checkout, version, extra_workers, args):
+    sys.path.insert(0, str(checkout))
+
+    from server.agents.execution_agent import runtime as execution
+    from server.agents.execution_agent.tools import gmail
+    from server.agents.interaction_agent import runtime as interaction, tools
+    from server.config import get_settings
+    from server.services.conversation import log as conversation
+    from server.services.conversation.summarization.working_memory_log import WorkingMemoryLog
+    from server.services.execution import log_store, roster
+
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    case = fixture["follow_up"]
+    expected = next(draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"])
+    mailbox = FakeGmail(fixture["drafts"])
+    calls, routing = [], []
+    live_completion = interaction.request_chat_completion
+    handle_tool = interaction.handle_tool_call
+    settings = get_settings()
+    settings.interaction_agent_model = args.interaction_model
+    settings.execution_agent_model = args.execution_model
+    settings.conversation_summary_threshold = 0
+
+    def redact_error(message):
+        key = settings.openrouter_api_key
+        return message.replace(key, "[redacted]") if message and key else message
+
+    def track_model(role):
+        async def complete(**kwargs):
+            call = {"role": role, "model": kwargs["model"], "input_tokens": None}
+            calls.append(call)
+            try:
+                result = await live_completion(**kwargs)
+            except Exception as exc:
+                call["failed"] = True
+                call["error"] = redact_error(str(exc))
+                raise
+            call["input_tokens"] = (result.get("usage") or {}).get("prompt_tokens")
+            return result
+
+        return complete
+
+    def track_tool(name, arguments):
+        result = handle_tool(name, arguments)
+        if name in ("search_execution_agents", "send_message_to_agent"):
+            routing.append({
+                "tool": name, "arguments": arguments,
+                "success": result.success, "result": result.payload,
+            })
+        return result
+
+    with tempfile.TemporaryDirectory() as directory:
+        base = Path(directory)
+        agents = roster.AgentRoster(base / "roster.json")
+        logs = log_store.ExecutionAgentLogStore(base / "execution")
+        memory = WorkingMemoryLog(base / "working_memory.log")
+        with patch.object(conversation, "_resolve_working_memory_log", return_value=memory):
+            chat = conversation.ConversationLog(base / "conversation.log")
+        for worker in fixture["workers"]:
+            agents.add_agent(worker["name"])
+            if version == "lookup":
+                agents.update_summary(worker["name"], worker["summary"])
+            logs.record_agent_response(worker["name"], f'Saved draft ID {worker["draft_id"]}.')
+        for index in range(extra_workers):
+            topic = "Acme renewal" if index % 2 else "Vendor proposal"
+            name = f"{topic} archive {index}"
+            agents.add_agent(name)
+            if version == "lookup":
+                agents.update_summary(name, f"Reviewed an older {topic}.")
+
+        with (
+            patch.object(roster, "_agent_roster", agents),
+            patch.object(log_store, "_execution_agent_logs", logs),
+            patch.object(interaction, "get_conversation_log", return_value=chat),
+            patch.object(interaction, "get_working_memory_log", return_value=memory),
+            patch.object(tools, "get_conversation_log", return_value=chat),
+            patch.object(gmail, "_LOG_STORE", logs),
+            patch.object(gmail, "get_active_gmail_user_id", return_value=mailbox.user_id),
+            patch.object(gmail, "execute_gmail_tool", side_effect=mailbox.execute),
+            patch.object(interaction, "request_chat_completion", track_model("interaction")),
+            patch.object(execution, "request_chat_completion", track_model("execution")),
+            patch.object(interaction, "handle_tool_call", side_effect=track_tool),
+        ):
+            parent = asyncio.current_task()
+
+            async def run_turn():
+                result = await interaction.InteractionAgentRuntime().execute(case["instructions"])
+                # Dispatch and result callbacks both use create_task. Drain them while
+                # the isolated stores and Gmail patch are still installed.
+                current = asyncio.current_task()
+                while pending := asyncio.all_tasks() - {current, parent}:
+                    await asyncio.gather(*pending)
+                return result
+
+            started = time.monotonic()
+            turn = asyncio.create_task(run_turn())
+            try:
+                result = await asyncio.wait_for(asyncio.shield(turn), timeout=args.timeout)
+            finally:
+                pending = asyncio.all_tasks() - {asyncio.current_task()}
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            elapsed = time.monotonic() - started
+
+        entries = list(chat.iter_entries())
+
+    replies = [payload for tag, _, payload in entries if tag == "poke_reply"]
+    writes = [call for call in mailbox.calls if call[0] != "GMAIL_LIST_DRAFTS"]
+    interaction_tokens = [call["input_tokens"] for call in calls if call["role"] == "interaction"]
+    expected_text = " ".join(expected["body"].casefold().split())
+    returned_body = any(expected_text in " ".join(reply.casefold().split()) for reply in replies)
+    model_failed = any(call.get("failed") for call in calls)
+    return {
+        "version": version,
+        "roster_size": len(fixture["workers"]) + extra_workers,
+        "prompt": case["instructions"],
+        "expected_worker": case["worker"],
+        "expected_draft": expected["id"],
+        "task_success": None if model_failed else result.success and returned_body and not writes,
+        "initial_turn_success": result.success,
+        "initial_turn_error": redact_error(result.error),
+        "replies": replies,
+        "worker_results": [payload for tag, _, payload in entries if tag == "agent_message"],
+        "routing": routing,
+        "gmail_calls": mailbox.calls,
+        "unexpected_write_attempts": writes,
+        "interaction_input_tokens": (
+            sum(interaction_tokens) if all(value is not None for value in interaction_tokens) else None
+        ),
+        "model_calls": calls,
+        "elapsed_seconds": round(elapsed, 3),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--baseline-ref", default=DEFAULT_BASELINE)
+    parser.add_argument("--large-extra-workers", type=int, default=100)
+    parser.add_argument("--interaction-model", default="anthropic/claude-sonnet-4.6")
+    parser.add_argument("--execution-model", default="anthropic/claude-sonnet-4.6")
+    parser.add_argument("--timeout", type=float, default=180, help="Per-run timeout in seconds.")
+    parser.add_argument("--output", type=Path, help="Write JSON Lines results to this file.")
+    parser.add_argument("--child", nargs=3, metavar=("CHECKOUT", "VERSION", "EXTRA"), help=argparse.SUPPRESS)
+    args = parser.parse_args()
+
+    if args.child:
+        checkout, version, extra = args.child
+        print(json.dumps(asyncio.run(run_case(Path(checkout), version, int(extra), args))))
+        return
+
+    key = read_key()
+    if not key:
+        parser.error("Set OPENROUTER_API_KEY in the environment or the OpenPoke .env file.")
+    if args.large_extra_workers < 1 or args.timeout <= 0:
+        parser.error("Roster growth and timeout must be positive.")
+    env = {**os.environ, "OPENROUTER_API_KEY": key}
+
+    with tempfile.TemporaryDirectory() as directory:
+        base = Path(directory)
+        baseline = base / "baseline"
+        lookup = base / "lookup"
+        archive = subprocess.check_output(
+            ["git", "archive", "--format=zip", args.baseline_ref, "server"], cwd=ROOT
+        )
+        with zipfile.ZipFile(io.BytesIO(archive)) as source:
+            source.extractall(baseline)
+        shutil.copytree(
+            ROOT / "server", lookup / "server",
+            ignore=shutil.ignore_patterns("data", "__pycache__"),
+        )
+
+        for version, checkout in (("baseline", baseline), ("lookup", lookup)):
+            for extra in (0, args.large_extra_workers):
+                print(f"Running {version} with {extra} extra workers", file=sys.stderr)
+                process = subprocess.run(
+                    [
+                        sys.executable, str(Path(__file__).resolve()),
+                        "--interaction-model", args.interaction_model,
+                        "--execution-model", args.execution_model,
+                        "--timeout", str(args.timeout),
+                        "--child", str(checkout), version, str(extra),
+                    ],
+                    cwd=checkout, env=env, check=True, stdout=subprocess.PIPE, text=True,
+                )
+                record = json.dumps(json.loads(process.stdout))
+                print(record, flush=True)
+                if args.output:
+                    with args.output.open("a", encoding="utf-8") as output:
+                        output.write(record + "\n")
+
+
+if __name__ == "__main__":
+    main()

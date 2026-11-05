@@ -1,0 +1,21 @@
+{
+  "drafts": [
+    {"id": "acme-waiver-2027", "thread_id": "acme-billing-2027", "recipient_email": "billing@acme.example", "subject": "2027 renewal fee waiver", "body": "Could you waive the renewal fee as an exception?"},
+    {"id": "acme-deadline-2027", "thread_id": "acme-support-2027", "recipient_email": "support@acme.example", "subject": "2027 renewal deadline", "body": "Could we have another week to review the renewal?"},
+    {"id": "acme-waiver-2026", "thread_id": "acme-billing-2026", "recipient_email": "billing@acme.example", "subject": "2026 renewal fee waiver", "body": "Could you waive last year's renewal fee?"},
+    {"id": "jai-proposal", "thread_id": "jai-revision", "recipient_email": "jai@example.com", "subject": "Revised proposal", "body": "Jai, here's the revised proposal."},
+    {"id": "vijay-proposal", "thread_id": "vijay-revision", "recipient_email": "vijay@example.com", "subject": "Revised proposal", "body": "Vijay, here's the revised proposal."}
+  ],
+  "workers": [
+    {"name": "Acme waiver", "summary": "Drafted a 2027 renewal fee waiver exception for Acme Billing.", "draft_id": "acme-waiver-2027"},
+    {"name": "Acme deadline", "summary": "Drafted a 2027 renewal deadline extension for Acme Support.", "draft_id": "acme-deadline-2027"},
+    {"name": "Jai proposal", "summary": "Drafted a revised proposal for Jai.", "draft_id": "jai-proposal"},
+    {"name": "Vijay proposal", "summary": "Drafted a revised proposal for Vijay.", "draft_id": "vijay-proposal"}
+  ],
+  "follow_up": {
+    "query": "Acme 2027 renewal exception",
+    "instructions": "Show me the Acme fee-waiver draft we worked on.",
+    "worker": "Acme waiver",
+    "draft_id": "acme-waiver-2027"
+  }
+}
