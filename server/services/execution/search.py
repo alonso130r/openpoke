@@ -17,7 +17,13 @@ class SearchMatch(AgentRecord):
 
 
 def _terms(text: str) -> set[str]:
-    return set(_TERMS.findall(text.casefold())) - _FILLER
+    terms: set[str] = set()
+    for token in _TERMS.findall(text.casefold()):
+        if "@" in token or any(char.isdigit() for char in token):
+            terms.add(token)
+        else:
+            terms.update(token.split("-"))
+    return terms - _FILLER
 
 
 def search_agents(query: str, records: list[AgentRecord]) -> list[SearchMatch]:

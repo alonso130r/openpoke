@@ -34,3 +34,13 @@ class ExecutionSearchTests(unittest.TestCase):
         ]
         matches = search_agents("renewal waiver renewal", records)
         self.assertEqual([match["name"] for match in matches], ["Zulu", "Alpha", "Charlie"])
+
+    def test_hyphenated_query_keeps_the_waiver_in_a_crowded_shortlist(self):
+        records = [
+            {"name": f"Acme renewal archive {index}", "summary": "Reviewed an older Acme renewal."}
+            for index in range(100)
+        ]
+        records.append({"name": "Acme waiver", "summary": "Drafted an Acme renewal fee waiver."})
+        match = search_agents("Acme fee-waiver draft", records)[0]
+        self.assertEqual(match["name"], "Acme waiver")
+        self.assertEqual(match["matched_terms"], ["acme", "fee", "waiver"])

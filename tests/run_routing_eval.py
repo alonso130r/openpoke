@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,30 @@ from fake_gmail import FakeGmail
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("fixtures") / "routing_mailbox.json"
 DEFAULT_BASELINE = "5b5f635"
+_DRAFT_HEADERS = re.compile(r"^To:[ \t]*(.+)\r?\nSubject:[ \t]*(.+)", re.IGNORECASE | re.MULTILINE)
+
+
+def score_draft_replies(replies, expected):
+    """Check the requested body and flag conflicting draft blocks."""
+    def normalize(text):
+        return " ".join(text.casefold().split())
+
+    expected_body = normalize(expected["body"])
+    returned_body = any(expected_body in normalize(reply) for reply in replies)
+    conflicts = []
+    for index, reply in enumerate(replies):
+        headers = list(_DRAFT_HEADERS.finditer(reply))
+        for position, header in enumerate(headers):
+            end = headers[position + 1].start() if position + 1 < len(headers) else len(reply)
+            recipient, subject = header.groups()
+            body = reply[header.end():end]
+            if (
+                normalize(recipient) != normalize(expected["recipient_email"])
+                or normalize(subject) != normalize(expected["subject"])
+                or normalize(body) != expected_body
+            ):
+                conflicts.append({"reply_index": index, "recipient": recipient, "subject": subject})
+    return returned_body, conflicts
 
 
 def read_key():
@@ -144,8 +169,7 @@ async def run_case(checkout, version, extra_workers, args):
     replies = [payload for tag, _, payload in entries if tag == "poke_reply"]
     writes = [call for call in mailbox.calls if call[0] != "GMAIL_LIST_DRAFTS"]
     interaction_tokens = [call["input_tokens"] for call in calls if call["role"] == "interaction"]
-    expected_text = " ".join(expected["body"].casefold().split())
-    returned_body = any(expected_text in " ".join(reply.casefold().split()) for reply in replies)
+    returned_body, conflicting_drafts = score_draft_replies(replies, expected)
     model_failed = any(call.get("failed") for call in calls)
     return {
         "version": version,
@@ -153,7 +177,10 @@ async def run_case(checkout, version, extra_workers, args):
         "prompt": case["instructions"],
         "expected_worker": case["worker"],
         "expected_draft": expected["id"],
-        "task_success": None if model_failed else result.success and returned_body and not writes,
+        "task_success": (
+            None if model_failed else result.success and returned_body and not conflicting_drafts and not writes
+        ),
+        "conflicting_drafts": conflicting_drafts,
         "initial_turn_success": result.success,
         "initial_turn_error": redact_error(result.error),
         "replies": replies,
