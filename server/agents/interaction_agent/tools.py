@@ -8,6 +8,7 @@ from typing import Any, Optional
 from ...logging_config import logger
 from ...services.conversation import get_conversation_log
 from ...services.execution import get_agent_roster, get_execution_agent_logs
+from ...services.execution.search import search_agents
 from ..execution_agent.batch_manager import ExecutionBatchManager
 
 
@@ -26,17 +27,33 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "send_message_to_agent",
-            "description": "Deliver instructions to a specific execution agent. Creates a new agent if the name doesn't exist in the roster, or reuses an existing one.",
+            "description": "Deliver instructions to an execution agent. Explicitly reuse an existing name or create an agent with a new name.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "mode": {"type": "string", "enum": ["reuse", "create"]},
                     "agent_name": {
                         "type": "string",
                         "description": "Human-readable agent name describing its purpose (e.g., 'Vercel Job Offer', 'Email to Sharanjeet'). This name will be used to identify and potentially reuse the agent."
                     },
                     "instructions": {"type": "string", "description": "Instructions for the agent to execute."},
                 },
-                "required": ["agent_name", "instructions"],
+                "required": ["mode", "agent_name", "instructions"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_execution_agents",
+            "description": "Find up to three existing execution agents by keyword overlap with their routing summaries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Distinctive words about the prior task."},
+                },
+                "required": ["query"],
                 "additionalProperties": False,
             },
         },
@@ -108,16 +125,38 @@ TOOL_SCHEMAS = [
 _EXECUTION_BATCH_MANAGER = ExecutionBatchManager()
 
 
-# Create or reuse execution agent and dispatch instructions asynchronously
-def send_message_to_agent(agent_name: str, instructions: str) -> ToolResult:
-    """Send instructions to an execution agent."""
+def search_execution_agents(query: str) -> ToolResult:
+    """Look up prior work without dispatching an agent."""
+    if not isinstance(query, str):
+        return ToolResult(success=False, payload={"error": "Query must be a string"})
     roster = get_agent_roster()
     roster.load()
-    existing_agents = set(roster.get_agents())
-    is_new = agent_name not in existing_agents
+    return ToolResult(success=True, payload={"matches": search_agents(query, roster.get_records())})
 
+
+def send_message_to_agent(agent_name: str, instructions: str, mode: str) -> ToolResult:
+    """Send instructions to an explicitly selected or newly created agent."""
+    if mode not in ("create", "reuse"):
+        return ToolResult(success=False, payload={"error": "Mode must be create or reuse"})
+    if not isinstance(agent_name, str) or not agent_name.strip():
+        return ToolResult(success=False, payload={"error": "Agent name must be a nonempty string"})
+    if not isinstance(instructions, str) or not instructions.strip():
+        return ToolResult(success=False, payload={"error": "Instructions must be a nonempty string"})
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return ToolResult(success=False, payload={"error": "No event loop available"})
+
+    roster = get_agent_roster()
+    is_new = mode == "create"
     if is_new:
-        roster.add_agent(agent_name)
+        if not roster.add_agent(agent_name):
+            return ToolResult(success=False, payload={"error": "Agent name already exists"})
+    else:
+        roster.load()
+        if agent_name not in roster.get_agents():
+            return ToolResult(success=False, payload={"error": "Unknown execution agent"})
 
     get_execution_agent_logs().record_request(agent_name, instructions)
 
@@ -131,12 +170,6 @@ def send_message_to_agent(agent_name: str, instructions: str) -> ToolResult:
             logger.info(f"Agent '{agent_name}' completed: {status}")
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(f"Agent '{agent_name}' failed: {str(exc)}")
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        logger.error("No running event loop available for async execution")
-        return ToolResult(success=False, payload={"error": "No event loop available"})
 
     loop.create_task(_execute_async())
 
@@ -225,6 +258,8 @@ def handle_tool_call(name: str, arguments: Any) -> ToolResult:
         else:
             return ToolResult(success=False, payload={"error": "Invalid arguments format"})
 
+        if name == "search_execution_agents":
+            return search_execution_agents(**args)
         if name == "send_message_to_agent":
             return send_message_to_agent(**args)
         if name == "send_message_to_user":

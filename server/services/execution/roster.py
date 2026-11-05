@@ -74,14 +74,17 @@ class AgentRoster:
         finally:
             temp_path.unlink(missing_ok=True)
 
-    def add_agent(self, agent_name: str) -> None:
-        """Register a name without replacing any existing summary."""
+    def add_agent(self, agent_name: str) -> bool:
+        """Claim a new name and return whether it was inserted."""
         with self._locked():
             agents = self._read()
-            if agent_name not in agents:
-                agents[agent_name] = None
-                self._write(agents)
+            if agent_name in agents:
+                self._agents = agents
+                return False
+            agents[agent_name] = None
+            self._write(agents)
             self._agents = agents
+            return True
 
     def update_summary(self, agent_name: str, summary: str) -> bool:
         """Update a registered agent and return whether it exists."""
