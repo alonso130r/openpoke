@@ -29,3 +29,31 @@ class DraftReplyScoringTests(unittest.TestCase):
             with self.subTest(body=body):
                 reply = f"To: billing@acme.example\nSubject: Renewal\n\n{body}"
                 self.assertEqual(score_draft_replies([reply], expected), (True, []))
+
+
+class ProvenanceFixtureTests(unittest.TestCase):
+    def test_only_the_expected_worker_history_identifies_the_approved_draft(self):
+        import json
+
+        from run_routing_eval import CASES
+
+        cases = [case for case in json.loads(CASES.read_text()) if case.get("provenance")]
+        self.assertEqual(len(cases), 3)
+        for case in cases:
+            with self.subTest(case=case["id"]):
+                drafts = case["mailbox"]["drafts"]
+                expected = next(draft for draft in drafts if draft["id"] == case["draft_id"])
+                alternatives = [
+                    draft for draft in drafts if draft["id"] != expected["id"]
+                    and draft["recipient_email"] == expected["recipient_email"]
+                    and draft["subject"] == expected["subject"]
+                ]
+                self.assertTrue(alternatives)
+                self.assertTrue(all(draft["body"] != expected["body"] for draft in alternatives))
+                self.assertTrue(all("approved" not in draft["body"].lower() for draft in drafts))
+                workers = case["mailbox"]["workers"]
+                self.assertEqual(
+                    [worker["name"] for worker in workers if expected["id"] in worker.get("history", "")],
+                    [case["worker"]],
+                )
+                self.assertFalse(any(expected["id"] in worker["summary"] for worker in workers))

@@ -25,7 +25,7 @@ CASES = FIXTURE.with_name("routing_cases.json")
 DEFAULT_BASELINE = "5b5f635"
 
 
-def roster_distractors(count):
+def roster_distractors(count, extra_topics=()):
     """Create plausible prior work without changing the mailbox fixture."""
     topics = (
         "Acme Billing renewal fee waiver",
@@ -33,6 +33,7 @@ def roster_distractors(count):
         "Acme Billing renewal charge dispute",
         "Jai revised proposal",
         "Vijay revised proposal",
+        *extra_topics,
     )
     scopes = ("pilot", "enterprise", "regional", "partner", "trial")
     for index in range(count):
@@ -128,7 +129,7 @@ def read_key():
     return None
 
 
-async def run_case(checkout, version, extra_workers, args, case_id=None):
+async def run_case(checkout, version, extra_workers, args, case_id=None, target_position="default"):
     sys.path.insert(0, str(checkout))
 
     from server.agents.execution_agent import runtime as execution
@@ -144,6 +145,7 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
         next(item for item in json.loads(CASES.read_text(encoding="utf-8")) if item["id"] == case_id)
         if case_id else {"id": "acme-hyphen", "kind": "retrieve", **fixture["follow_up"]}
     )
+    fixture = case.get("mailbox", fixture)
     expected = next((draft for draft in fixture["drafts"] if draft["id"] == case["draft_id"]), None)
     mailbox = FakeGmail(fixture["drafts"])
     calls, routing, interaction_tools = [], [], []
@@ -203,9 +205,20 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
                 chat.record_agent_message(context)
             else:
                 chat.record_user_message(context)
-        workers = [*fixture["workers"], *roster_distractors(extra_workers)]
+        extra_topics = {
+            "stress-acme-week": ("Acme Support renewal two-week extension",),
+            "stress-jai-address": ("Jai Northstar revised proposal",),
+            "stress-acme-year": ("Acme Billing renewal fee waiver approval",),
+            "stress-atlas-revision": ("Vijay Atlas fixed-price proposal with support add-on",),
+        }.get(case["id"], ())
+        workers = [*fixture["workers"], *roster_distractors(extra_workers, extra_topics)]
         if extra_workers:
             random.Random(case["id"]).shuffle(workers)
+        if target_position != "default":
+            target_worker = next(worker for worker in workers if worker["name"] == case["worker"])
+            workers.remove(target_worker)
+            position = {"early": 0, "middle": len(workers) // 2, "late": len(workers)}
+            workers.insert(position[target_position], target_worker)
         for worker in workers:
             agents.add_agent(worker["name"])
             if version == "lookup":
@@ -214,7 +227,7 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
                 f'Saved draft ID {worker["draft_id"]}.'
                 if "draft_id" in worker else worker["summary"]
             )
-            logs.record_agent_response(worker["name"], history)
+            logs.record_agent_response(worker["name"], worker.get("history", history))
 
         with (
             patch.object(roster, "_agent_roster", agents),
@@ -281,9 +294,33 @@ async def run_case(checkout, version, extra_workers, args, case_id=None):
                   if event["tool"] == "search_execution_agents" and event["success"]]
     target = case["worker"]
     model_failed = any(call.get("failed") for call in calls)
+    exact_dispatch = (
+        len(dispatched) == 1 and dispatched[0]["agent_name"] == target
+        and not dispatched[0]["new_agent_created"]
+        if target and not model_failed else None
+    )
+    provenance_outcome = None
+    if case.get("provenance"):
+        if model_failed:
+            provenance_outcome = "model_error"
+        elif writes:
+            provenance_outcome = "unexpected_write"
+        elif result.success and success:
+            provenance_outcome = "correct_direct" if exact_dispatch else "correct_after_routing_miss"
+        elif conflicting_drafts:
+            provenance_outcome = "conflicting_draft"
+        else:
+            provenance_outcome = "review_reply"
+
     return {
         "case": case["id"],
         "case_kind": case["kind"],
+        "target_position": target_position,
+        "expected_worker_roster_index": next(
+            (index for index, worker in enumerate(workers) if worker["name"] == target), None
+        ),
+        "exact_dispatch_success": exact_dispatch,
+        "provenance_outcome": provenance_outcome,
         "version": version,
         "roster_size": len(fixture["workers"]) + extra_workers,
         "prompt": case["instructions"],
@@ -338,16 +375,26 @@ def main():
     parser.add_argument("--execution-model", default="anthropic/claude-sonnet-4.6")
     parser.add_argument("--timeout", type=float, default=180, help="Per-run timeout in seconds.")
     parser.add_argument("--output", type=Path, help="Write JSON Lines results to this file.")
-    case_ids = [case["id"] for case in json.loads(CASES.read_text(encoding="utf-8"))]
+    cases = {case["id"]: case for case in json.loads(CASES.read_text(encoding="utf-8"))}
+    case_ids = list(cases)
     parser.add_argument("--case", choices=case_ids, action="append", help="Run only this case. Repeat to select several.")
-    parser.add_argument("--child", nargs=4, metavar=("CHECKOUT", "VERSION", "EXTRA", "CASE"), help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--target-position", choices=("early", "middle", "late"),
+        help="Run only stress cases at this position on the large roster.",
+    )
+    parser.add_argument("--child", nargs=5, metavar=("CHECKOUT", "VERSION", "EXTRA", "CASE", "POSITION"), help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.child:
-        checkout, version, extra, case_id = args.child
-        print(json.dumps(asyncio.run(run_case(Path(checkout), version, int(extra), args, case_id))))
+        checkout, version, extra, case_id, position = args.child
+        print(json.dumps(asyncio.run(run_case(Path(checkout), version, int(extra), args, case_id, position))))
         return
 
+    selected_cases = args.case or case_ids
+    if args.target_position:
+        if args.case and any("mailbox" not in cases[case_id] for case_id in args.case):
+            parser.error("--target-position requires stress cases")
+        selected_cases = [case_id for case_id in selected_cases if "mailbox" in cases[case_id]]
     key = read_key()
     if not key:
         parser.error("Set OPENROUTER_API_KEY in the environment or the OpenPoke .env file.")
@@ -370,25 +417,32 @@ def main():
             ignore=shutil.ignore_patterns("data", "__pycache__"),
         )
 
-        for case_id in args.case or case_ids:
+        for case_id in selected_cases:
             for version, checkout in (("baseline", baseline), ("lookup", lookup)):
-                for extra in (0, args.large_extra_workers):
-                    print(f"Running {version} case {case_id} with {extra} extra workers", file=sys.stderr)
-                    process = subprocess.run(
-                        [
-                            sys.executable, str(Path(__file__).resolve()),
-                            "--interaction-model", args.interaction_model,
-                            "--execution-model", args.execution_model,
-                            "--timeout", str(args.timeout),
-                            "--child", str(checkout), version, str(extra), case_id,
-                        ],
-                        cwd=checkout, env=env, check=True, stdout=subprocess.PIPE, text=True,
+                roster_sizes = (args.large_extra_workers,) if args.target_position else (0, args.large_extra_workers)
+                for extra in roster_sizes:
+                    positions = (
+                        (args.target_position,) if args.target_position
+                        else ("early", "middle", "late") if extra and "mailbox" in cases[case_id]
+                        else ("default",)
                     )
-                    record = json.dumps(json.loads(process.stdout))
-                    print(record, flush=True)
-                    if args.output:
-                        with args.output.open("a", encoding="utf-8") as output:
-                            output.write(record + "\n")
+                    for position in positions:
+                        print(f"Running {version} case {case_id} with {extra} extra workers ({position})", file=sys.stderr)
+                        process = subprocess.run(
+                            [
+                                sys.executable, str(Path(__file__).resolve()),
+                                "--interaction-model", args.interaction_model,
+                                "--execution-model", args.execution_model,
+                                "--timeout", str(args.timeout),
+                                "--child", str(checkout), version, str(extra), case_id, position,
+                            ],
+                            cwd=checkout, env=env, check=True, stdout=subprocess.PIPE, text=True,
+                        )
+                        record = json.dumps(json.loads(process.stdout))
+                        print(record, flush=True)
+                        if args.output:
+                            with args.output.open("a", encoding="utf-8") as output:
+                                output.write(record + "\n")
 
 
 if __name__ == "__main__":
