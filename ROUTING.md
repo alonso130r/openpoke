@@ -60,6 +60,20 @@ can't find a good match. Dispatch explicitly says whether to reuse a
 worker or create a new one. Reuse keeps the existing history. An unknown
 reuse ID fails without creating a worker.
 
+## Why not start with semantic search?
+
+Consider "Has Vijay responded to my latest email?" and "Has Jai responded
+to my latest email?" The requests have almost the same meaning, but the
+name is what tells us which worker to reuse. If the worker summary
+preserves the name, a whole-word match gives us an explicit signal.
+Embedding similarity can distinguish the two, but it doesn't guarantee
+that the recipient will decide the ranking.
+
+We already ask each worker for one sentence about what it did. If that
+sentence keeps the details the user is likely to mention again, we can
+scan the roster directly. We also get to see which words matched when
+something goes wrong.
+
 ## What did we try along the way?
 
 - **Search only when the model asks for it.** Luna sometimes recognized a
